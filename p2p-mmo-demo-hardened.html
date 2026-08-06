@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>P2P Arena — AOI Committee Protocol v8</title>
+<title>P2P Arena — 1.5-Hop Relay Protocol v11</title>
 <style>
 :root{
     --bg:#0a0e12;--panel:#10161c;--line:#1c2733;--grid:#141b22;
@@ -27,8 +27,11 @@ canvas{display:block;width:100%;height:100%}
 .overlayTitle{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
 #kdaValue{font-size:19px;letter-spacing:.08em;color:var(--fg)}
 #kdaValue b{color:var(--accent);font-weight:600}
-#healthValue{margin-top:7px;font-size:10.5px;color:var(--dim)}
-#healthValue strong{color:var(--fg)}
+#healthMeter{margin-top:8px;display:flex;gap:4px;width:100%}
+.healthPip{height:5px;flex:1;border-radius:2px;background:#26313b;transition:background .15s,opacity .15s}
+.healthPip.on[data-level="3"]{background:var(--accent)}
+.healthPip.on[data-level="2"]{background:var(--warn)}
+.healthPip.on[data-level="1"]{background:var(--err)}
 #killFeed{right:12px;width:290px;max-height:220px;padding:9px 10px;overflow:hidden}
 .killRow{font-size:10.5px;padding:5px 2px;border-top:1px dashed rgba(92,114,132,.22);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .killRow:first-of-type{border-top:none}
@@ -59,28 +62,51 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 #log{flex:1;overflow:auto;font-size:10px;padding:8px 0 10px;line-height:1.5}
 #log div{margin-bottom:2px;white-space:pre-wrap;word-break:break-word}.t-sig{color:var(--warn)}.t-cmd{color:var(--accent)}.t-audit{color:var(--audit)}.t-warn{color:var(--warn)}.t-err{color:var(--err)}.t-sys{color:var(--dim)}
 #logEmpty{display:none;color:var(--dim);padding:12px 0;text-align:center}
+.ideaNotes{font-size:10px;color:var(--dim)}
+.ideaNotes summary{cursor:pointer;color:var(--fg);font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+.ideaBody{padding-top:8px;line-height:1.55}.ideaBody b{color:var(--audit)}
+
+#roomGate{position:fixed;z-index:50;top:42px;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:rgba(92,100,108,.82);backdrop-filter:grayscale(1) blur(2px);transition:opacity .18s,visibility .18s}
+#roomGate.hidden{opacity:0;visibility:hidden;pointer-events:none}
+.roomGateCard{min-width:280px;max-width:420px;padding:22px 26px;text-align:center;background:rgba(24,29,34,.94);border:1px solid rgba(201,214,224,.28);border-radius:8px;box-shadow:0 14px 50px rgba(0,0,0,.35)}
+.roomSpinner{width:32px;height:32px;margin:0 auto 14px;border:3px solid rgba(201,214,224,.22);border-top-color:#d7dde2;border-radius:50%;animation:roomSpin .75s linear infinite}
+#roomGate[data-state="error"] .roomSpinner{animation:none;border-color:var(--err)}
+#roomGateTitle{font-size:12px;letter-spacing:.08em;color:#eef2f5;margin-bottom:7px}
+#roomGateDetail{font-size:10px;line-height:1.55;color:#aeb9c1}
+@keyframes roomSpin{to{transform:rotate(360deg)}}
 ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
 </style>
 </head>
 <body>
 <header>
     <h1>P2P Arena</h1>
-    <span class="sub">WebSocket signaling · WebRTC mesh · AOI checkpoint · deterministic validator committee · combat protocol v8</span>
+    <span class="sub">WebSocket signaling · WebRTC mesh · AOI committee · authoritative interpolation · discovery-only 1.5-hop relay · room-gated protocol v12</span>
     <span id="tick">TICK 0</span>
 </header>
+<div id="roomGate" data-state="checking" aria-live="polite" aria-busy="true">
+    <div class="roomGateCard">
+        <div class="roomSpinner"></div>
+        <div id="roomGateTitle">방 확인 중</div>
+        <div id="roomGateDetail">시그널 서버에 연결하고 방 상태를 확인하고 있습니다.</div>
+    </div>
+</div>
 <main>
     <div id="stage">
         <canvas id="canvas"></canvas>
         <div id="kdaOverlay" class="overlay">
             <div class="overlayTitle">최근 5분 K / D / A</div>
             <div id="kdaValue"><b>0</b> / 0 / 0</div>
-            <div id="healthValue">HP <strong>3 / 3</strong></div>
+            <div id="healthMeter" aria-label="체력 상태">
+                <span class="healthPip on" data-level="1"></span>
+                <span class="healthPip on" data-level="2"></span>
+                <span class="healthPip on" data-level="3"></span>
+            </div>
         </div>
         <div id="killFeed" class="overlay">
             <div class="overlayTitle">Kill Feed</div>
             <div id="killFeedRows"><div class="killEmpty">아직 처치 기록 없음</div></div>
         </div>
-        <div id="hint">좌클릭: 사격 · 우클릭: 목적지 이동 · 방향키: 즉시 이동 · 원은 AOI 범위 · 3회 피격 시 사망 · 5초 뒤 리스폰 · 1초 정지마다 HP 1 회복</div>
+        <div id="hint">좌클릭: 사격 · 우클릭: 목적지 이동 · 방향키: 즉시 이동 · 원은 AOI 범위 · 3회 피격 시 사망 · 5초 뒤 리스폰 · 1초 정지마다 체력 회복</div>
     </div>
     <aside>
         <div class="block">
@@ -110,6 +136,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
             <div class="row"><span>rejected</span><span id="rejectedStat">0</span></div>
             <div class="row"><span>stalled</span><span id="stalledStat">0</span></div>
             <div class="row"><span>membership mismatch</span><span id="membershipMismatchStat">0</span></div>
+            <div class="row"><span>1.5-hop relay</span><span id="relayStat">0 / 0</span></div>
         </div>
         <div class="block">
             <h2>Network Metrics</h2>
@@ -117,12 +144,22 @@ button:hover{color:var(--fg);border-color:var(--dim)}
             <div class="row"><span>msg/sec</span><span id="messageRateStat">0 / 0</span></div>
             <div class="row"><span>avg commit</span><span id="commitLatencyStat">-</span></div>
             <div class="row"><span>shoot checkpoint</span><span id="checkpointStat">0 players</span></div>
+            <div class="row"><span>relay rx / drop</span><span id="relayMetricStat">0 / 0</span></div>
             <div class="row"><span>identity trust</span><span style="color:var(--warn)">self-issued</span></div>
         </div>
         <div class="block" style="padding-bottom:8px">
             <h2>Legend</h2>
-            <div class="legend"><span>white ring: local</span><span>orange ring: pending</span><span>green circle: AOI</span><span>gray: dead</span></div>
+            <div class="legend"><span>white ring: local</span><span>orange ring: pending</span><span>green circle: AOI</span><span>blue dash: relay</span><span>gray: dead</span></div>
         </div>
+        <details class="block ideaNotes">
+            <summary>Architecture Notes</summary>
+            <div class="ideaBody">
+                <b>1-hop</b>: 직접 상태·명령·검증<br>
+                <b>1.5-hop</b>: 직접 이웃이 관측한 요약 상태. discovery/prefetch 전용<br>
+                <b>Skip group</b>: 원거리·그룹 간 브리지 토폴로지 후보. 1.5-hop과 결합 가능<br>
+                간접 상태는 전투·HP·재화 판정에 사용하지 않는다.
+            </div>
+        </details>
         <div class="block" id="logBlock">
             <h2>Event / Validation Log</h2>
             <div class="logToolbar">
@@ -141,12 +178,12 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 <script>
 'use strict';
 
-const PROTOCOL = 8;
-const SIGNAL_PROTOCOL = 1;
+const PROTOCOL = 12;
+const SIGNAL_PROTOCOL = 2;
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
-const AOI_RADIUS = clampNumber(params.get('aoi'), 520, 240, 1400);
+const AOI_RADIUS = clampNumber(params.get('aoi'), 260, 120, 1400);
 const COMMITTEE_SIZE = Math.round(clampNumber(params.get('committee'), 3, 1, 7));
 const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -156,25 +193,33 @@ const BASE_MAX_STEP = 50;
 const STEP_JITTER_ALLOWANCE = 1.35;
 const STEP_EPSILON = 0.75;
 const MAX_TICK_ADVANCE = 120;
-const MAX_RANGE = 450;
+const MAX_RANGE = Math.max(60, Math.min(450, AOI_RADIUS - 30));
 const HIT_RADIUS = 14;
 const MAX_HP = 3;
 const RESPAWN_MS = 5000;
 const REGEN_INTERVAL_TICKS = 30;
-const BULLET_TRAIL_MS = 70;
+const BULLET_TRAIL_MS = 160;
 const MOVE_SPEED = 220;
-const MOVE_MIN_DURATION = 250;
-const MOVE_MAX_DURATION = 2500;
+const MOVE_ACCEL = 620;
+const MOVE_DECEL = 560;
+const MOVE_MAX_DURATION = 5000;
 const AUDIT_STALL_MS = 1200;
 const DISCONNECT_GRACE_MS = 5000;
 const SIGNAL_CONNECT_TIMEOUT_MS = 45000;
 const SIGNAL_RECONNECT_BASE_MS = 800;
 const SIGNAL_RECONNECT_MAX_MS = 15000;
 const SIGNAL_KEEPALIVE_MS = 25000;
+const ROOM_JOIN_TIMEOUT_MS = 12000;
 const ORPHAN_RECEIPT_TTL_MS = 8000;
 const KDA_WINDOW_MS = 5 * 60 * 1000;
 const KILL_FEED_LIMIT = 8;
 const COMMIT_LATENCY_SAMPLES = 240;
+const REMOTE_INTERPOLATION_MS = 115;
+const REMOTE_SNAP_DISTANCE = 180;
+const RELAY_INTERVAL_MS = 750;
+const RELAY_TTL_MS = 2500;
+const RELAY_MAX_ENTRIES = 12;
+const RELAY_PREFETCH_RADIUS = Math.min(1800, AOI_RADIUS * 1.5);
 const COLORS = ['#3ddc97','#f2a93b','#7aa5ff','#ef5b6e','#c77dff','#4fd6d6','#e0c341'];
 
 const myId = randomId(8);
@@ -190,7 +235,10 @@ const visibleWorld = Object.create(null);
 const confirmedSeq = new Map();
 const tickAnchors = new Map();
 const activityAnchors = new Map();
-const moveState = Object.create(null);
+const moveState = Object.create(null); // local input segment only
+const remoteRenderState = Object.create(null); // remote authoritative interpolation only
+const relayWorld = new Map(); // discovery-only 1.5-hop summaries; never authoritative
+const seenRelayRecords = new Map();
 const bullets = [];
 const hitFlashes = Object.create(null);
 const pendingById = new Map();
@@ -217,12 +265,16 @@ let duplicateCounter = 0;
 let invalidCounter = 0;
 let stalledCounter = 0;
 let membershipMismatchCounter = 0;
+let relayAcceptedCounter = 0;
+let relayDroppedCounter = 0;
 let signalingSocket = null;
 let signalingGeneration = 0;
 let signalReconnectAttempt = 0;
 let signalReconnectTimer = null;
 let signalConnectTimeout = null;
 let signalKeepaliveTimer = null;
+let roomJoinTimeout = null;
+let roomReady = false;
 let signalManualClose = false;
 let pageUnloading = false;
 let pendingLogs = [];
@@ -232,6 +284,9 @@ let activeLogFilter = 'all';
 
 const canvas = document.getElementById('canvas');
 const context = canvas.getContext('2d');
+const roomGate = document.getElementById('roomGate');
+const roomGateTitle = document.getElementById('roomGateTitle');
+const roomGateDetail = document.getElementById('roomGateDetail');
 document.getElementById('peerId').textContent = myId;
 document.getElementById('signalRoom').textContent = ROOM_ID;
 
@@ -316,14 +371,73 @@ function refreshMembership(reason=''){
 function distanceBetweenStates(a,b){ return a&&b?Math.hypot(a.x-b.x,a.y-b.y):Infinity; }
 function isInLocalAoi(playerId){ if(playerId===myId) return true; return distanceBetweenStates(visibleWorld[myId],visibleWorld[playerId])<=AOI_RADIUS; }
 function localAoiPeerIds(){ return currentMembershipIds().filter(id=>id!==myId&&isInLocalAoi(id)); }
-function sendToAoi(message,originState=visibleWorld[myId]){
-    for(const [id,peer] of [...peers]){
-        if(peer.dc?.readyState!=='open') continue;
-        const remote=visibleWorld[id];
-        if(remote&&distanceBetweenStates(originState,remote)<=AOI_RADIUS) safeDataSend(id,message);
+function directOpenPeerIds(){ return [...peers].filter(([,peer])=>peer.dc?.readyState==='open').map(([id])=>id); }
+function relayRecordKey(entry){ return `${entry.ownerId}:${entry.sequence}:${entry.stateHash}`; }
+function buildRelayEntry(ownerId){
+    const state=confirmedWorld[ownerId];
+    if(!state||ownerId===myId) return null;
+    return {
+        ownerId,
+        sourcePeerId:myId,
+        relayDepth:1,
+        sequence:state.sequence,
+        tick:state.tick,
+        x:round6(state.x),
+        y:round6(state.y),
+        alive:Boolean(state.alive),
+        lifeId:state.lifeId,
+        stateHash:stateHash(state)
+    };
+}
+function sendNeighborDigest(remoteId){
+    const peer=peers.get(remoteId); if(peer?.dc?.readyState!=='open') return;
+    const recipient=confirmedWorld[remoteId]||visibleWorld[remoteId];
+    const candidates=[];
+    for(const ownerId of directOpenPeerIds()){
+        if(ownerId===remoteId) continue;
+        const entry=buildRelayEntry(ownerId); if(!entry) continue;
+        const state=confirmedWorld[ownerId];
+        const distance=recipient?distanceBetweenStates(recipient,state):Infinity;
+        if(distance<=RELAY_PREFETCH_RADIUS||isInLocalAoi(ownerId)) candidates.push({entry,distance});
+    }
+    candidates.sort((a,b)=>a.distance-b.distance||a.entry.ownerId.localeCompare(b.entry.ownerId));
+    const entries=candidates.slice(0,RELAY_MAX_ENTRIES).map(item=>item.entry);
+    safeDataSend(remoteId,{kind:'neighborDigest',digest:{protocol:PROTOCOL,senderId:myId,relayDepth:1,ttlMs:RELAY_TTL_MS,entries}});
+}
+function broadcastNeighborDigests(){ for(const id of directOpenPeerIds()) sendNeighborDigest(id); }
+function validRelayEntry(remoteId,entry){
+    return entry&&entry.sourcePeerId===remoteId&&entry.relayDepth===1&&typeof entry.ownerId==='string'&&entry.ownerId!==myId&&entry.ownerId!==remoteId&&
+        Number.isSafeInteger(entry.sequence)&&entry.sequence>=0&&Number.isSafeInteger(entry.tick)&&entry.tick>=0&&
+        Number.isFinite(entry.x)&&Number.isFinite(entry.y)&&Number.isSafeInteger(entry.lifeId)&&entry.lifeId>=1&&
+        typeof entry.alive==='boolean'&&typeof entry.stateHash==='string'&&entry.stateHash.length<=32;
+}
+function receiveNeighborDigest(remoteId,digest){
+    if(!digest||digest.protocol!==PROTOCOL||digest.senderId!==remoteId||digest.relayDepth!==1||!Array.isArray(digest.entries)||digest.entries.length>RELAY_MAX_ENTRIES){
+        invalidCounter++; log('t-warn',`invalid 1.5-hop digest from=${remoteId}`); return;
+    }
+    const now=performance.now();
+    const ttl=Math.max(300,Math.min(RELAY_TTL_MS,Number(digest.ttlMs)||RELAY_TTL_MS));
+    for(const entry of digest.entries){
+        if(!validRelayEntry(remoteId,entry)){ relayDroppedCounter++; continue; }
+        // 직접 연결/직접 상태가 있으면 간접 정보는 저장하지 않는다.
+        if(peers.get(entry.ownerId)?.dc?.readyState==='open'||confirmedWorld[entry.ownerId]){ relayDroppedCounter++; continue; }
+        const key=relayRecordKey(entry);
+        const seenUntil=seenRelayRecords.get(key)||0;
+        if(seenUntil>now){ relayDroppedCounter++; continue; }
+        seenRelayRecords.set(key,now+ttl);
+        const existing=relayWorld.get(entry.ownerId);
+        if(existing&&(entry.sequence<existing.sequence||(entry.sequence===existing.sequence&&entry.stateHash===existing.stateHash))){ relayDroppedCounter++; continue; }
+        relayWorld.set(entry.ownerId,{...entry,receivedAt:now,expiresAt:now+ttl});
+        relayAcceptedCounter++;
     }
 }
-
+function pruneRelayWorld(){
+    const now=performance.now();
+    for(const [key,until] of seenRelayRecords) if(until<=now) seenRelayRecords.delete(key);
+    for(const [ownerId,entry] of relayWorld){
+        if(entry.expiresAt<=now||peers.get(ownerId)?.dc?.readyState==='open'||confirmedWorld[ownerId]) relayWorld.delete(ownerId);
+    }
+}
 function allowedStepForTicks(previousTick,commandTick){
     const elapsedTicks=Math.max(1,Math.min(MAX_TICK_ADVANCE,commandTick-previousTick));
     const elapsedSteps=elapsedTicks/(STEP_INTERVAL_MS/TICK_MS);
@@ -428,6 +542,9 @@ function acceptCommand(command,remote){
     const pending={command,previousState:{...previous},nextState:predictNextState(previous,command),receipts:new Map(),verdict:null,stalled:false,timeoutId:null,remote,receivedAt:performance.now()};
     pendingById.set(command.commandId,pending);
     const order=pendingOrderByPlayer.get(command.playerId)||[]; order.push(command.commandId); pendingOrderByPlayer.set(command.playerId,order);
+    // 원격 화면은 검증 완료를 기다리지 않고 tentative 권위 좌표를 보간한다.
+    // 거절되면 rebuildVisible()이 confirmed 좌표로 부드럽게 교정한다.
+    rebuildVisible(command.playerId);
     if(command.type==='shoot') spawnBullet(command);
     const validators=validatorsFor(command); const quorum=quorumFor(command);
     log('t-cmd',`${command.type} tentative id=${command.commandId} seq=${command.sequence} validators=${validators.join(',')} quorum=${quorum}`);
@@ -469,7 +586,7 @@ function runAudit(command){
         const activity=activityAnchors.get(command.playerId);
         const idleMs=activity?performance.now()-Math.max(activity.lastMoveAt,activity.lastDamageAt,activity.lastHealAt):0;
         accepted=previous.alive&&previous.hp<MAX_HP&&idleMs>=900&&command.claimedHp===previous.hp+1;
-        reason=accepted?'heal verified':`heal invalid hp=${previous.hp} idleMs=${Math.round(idleMs)}`;
+        reason=accepted?'heal verified':`heal invalid state idleMs=${Math.round(idleMs)}`;
     }else if(command.type==='respawn'){
         const deathAge=performance.now()-(previous.deadObservedAt||0);
         accepted=!previous.alive&&deathAge>=RESPAWN_MS-300&&command.nextLifeId===previous.lifeId+1&&inBounds(command.spawnX,command.spawnY);
@@ -575,6 +692,7 @@ function rebuildVisible(playerId){
     let state={...base,tentative:false};
     for(const id of pendingOrderByPlayer.get(playerId)||[]){ const pending=pendingById.get(id); if(!pending) continue; pending.previousState={...state}; pending.nextState=predictNextState(state,pending.command); state={...pending.nextState}; }
     visibleWorld[playerId]=state;
+    if(playerId!==myId) queueRemoteRenderTarget(playerId,state);
 }
 function acceptDeferred(playerId){
     let progressed=true;
@@ -639,26 +757,111 @@ function onRespawnCommitted(command,state){
 }
 
 function spawnBullet(command){ bullets.push({x1:command.originX,y1:command.originY,x2:command.originX+command.dirX*MAX_RANGE,y2:command.originY+command.dirY*MAX_RANGE,born:performance.now(),color:visibleWorld[command.playerId]?.color||'#fff'}); }
+function buildMoveProfile(distance,startSpeed){
+    const d=Math.max(0,distance);
+    const v0=Math.max(0,startSpeed);
+    if(d<=1e-6) return {startSpeed:v0,peakSpeed:0,accelTime:0,cruiseTime:0,decelTime:0,accelDistance:0,cruiseDistance:0,totalTime:0,startsDecelerating:true};
+
+    // A retarget begins at the currently rendered speed. Speed cannot drop at the retarget instant.
+    // Deceleration starts only when the remaining distance is at or below the braking distance.
+    const brakeDistance=v0*v0/(2*MOVE_DECEL);
+    if(d<=brakeDistance+1e-6){
+        const decel=Math.max(MOVE_DECEL,v0*v0/(2*d));
+        return {startSpeed:v0,peakSpeed:v0,accelTime:0,cruiseTime:0,decelTime:v0/decel,accelDistance:0,cruiseDistance:0,decel,startsDecelerating:true,totalTime:v0/decel};
+    }
+
+    const cap=Math.max(MOVE_SPEED,v0);
+    const accelDistance=Math.max(0,(cap*cap-v0*v0)/(2*MOVE_ACCEL));
+    const decelDistance=cap*cap/(2*MOVE_DECEL);
+    if(accelDistance+decelDistance<=d){
+        const cruiseDistance=d-accelDistance-decelDistance;
+        const accelTime=(cap-v0)/MOVE_ACCEL;
+        const cruiseTime=cruiseDistance/cap;
+        const decelTime=cap/MOVE_DECEL;
+        return {startSpeed:v0,peakSpeed:cap,accelTime,cruiseTime,decelTime,accelDistance,cruiseDistance,decel:MOVE_DECEL,startsDecelerating:false,totalTime:accelTime+cruiseTime+decelTime};
+    }
+
+    const peakSquared=(d+v0*v0/(2*MOVE_ACCEL))*2*MOVE_ACCEL*MOVE_DECEL/(MOVE_ACCEL+MOVE_DECEL);
+    const peak=Math.sqrt(Math.max(v0*v0,peakSquared));
+    const accelTime=Math.max(0,(peak-v0)/MOVE_ACCEL);
+    const actualAccelDistance=Math.max(0,(peak*peak-v0*v0)/(2*MOVE_ACCEL));
+    const decelTime=peak/MOVE_DECEL;
+    return {startSpeed:v0,peakSpeed:peak,accelTime,cruiseTime:0,decelTime,accelDistance:actualAccelDistance,cruiseDistance:0,decel:MOVE_DECEL,startsDecelerating:false,totalTime:accelTime+decelTime};
+}
+function evalMove(movement,now){
+    const elapsed=Math.max(0,Math.min(movement.profile.totalTime,(now-movement.startTime)/1000));
+    const p=movement.profile;
+    let travelled=0,speed=0,phase='finished';
+    if(elapsed<p.accelTime){
+        travelled=p.startSpeed*elapsed+.5*MOVE_ACCEL*elapsed*elapsed;
+        speed=p.startSpeed+MOVE_ACCEL*elapsed;
+        phase='accelerating';
+    }else if(elapsed<p.accelTime+p.cruiseTime){
+        const t=elapsed-p.accelTime;
+        travelled=p.accelDistance+p.peakSpeed*t;
+        speed=p.peakSpeed;
+        phase='cruising';
+    }else if(elapsed<p.totalTime){
+        const t=elapsed-p.accelTime-p.cruiseTime;
+        travelled=p.accelDistance+p.cruiseDistance+p.peakSpeed*t-.5*p.decel*t*t;
+        speed=Math.max(0,p.peakSpeed-p.decel*t);
+        phase='decelerating';
+    }else{
+        travelled=movement.distance;
+    }
+    const ratio=movement.distance>0?Math.max(0,Math.min(1,travelled/movement.distance)):1;
+    return {x:movement.startX+movement.dirX*movement.distance*ratio,y:movement.startY+movement.dirY*movement.distance*ratio,speed,phase,finished:elapsed>=p.totalTime||now>=movement.hardStopAt};
+}
 function startMove(playerId,fromX,fromY,toX,toY){
-    const distance=Math.hypot(toX-fromX,toY-fromY); const duration=Math.min(MOVE_MAX_DURATION,Math.max(MOVE_MIN_DURATION,distance/MOVE_SPEED*1000)); const now=performance.now();
-    moveState[playerId]={startX:fromX,startY:fromY,targetX:toX,targetY:toY,startTime:now,naturalDuration:duration,hardStopAt:now+MOVE_MAX_DURATION,lastX:fromX,lastY:fromY};
-    if(playerId===myId) sendToAoi({kind:'moveIntent',intent:{playerId,startX:fromX,startY:fromY,targetX:toX,targetY:toY,naturalDuration:duration,maxDuration:MOVE_MAX_DURATION}},visibleWorld[myId]);
+    if(playerId!==myId) return;
+    const now=performance.now();
+    const previous=moveState[myId];
+    const sampled=previous?evalMove(previous,now):null;
+    const startX=sampled?.x??fromX,startY=sampled?.y??fromY;
+    const dx=toX-startX,dy=toY-startY,distance=Math.hypot(dx,dy);
+    if(distance<=1e-6){ delete moveState[myId]; return; }
+    const currentSpeed=sampled&&!sampled.finished?sampled.speed:0;
+    const profile=buildMoveProfile(distance,currentSpeed);
+    moveState[myId]={startX,startY,targetX:toX,targetY:toY,dirX:dx/distance,dirY:dy/distance,distance,startTime:now,profile,hardStopAt:now+Math.max(MOVE_MAX_DURATION,(profile.totalTime+1)*1000),lastX:startX,lastY:startY};
 }
-function receiveMoveIntent(remoteId,intent){
-    if(!intent||intent.playerId!==remoteId||![intent.startX,intent.startY,intent.targetX,intent.targetY,intent.naturalDuration].every(Number.isFinite)) return;
-    if(!confirmedWorld[remoteId]?.alive) return;
-    const now=performance.now(); moveState[remoteId]={startX:intent.startX,startY:intent.startY,targetX:intent.targetX,targetY:intent.targetY,startTime:now,naturalDuration:Math.min(MOVE_MAX_DURATION,Math.max(1,intent.naturalDuration)),hardStopAt:now+MOVE_MAX_DURATION,lastX:intent.startX,lastY:intent.startY};
+function sampleRemoteRender(playerId,now=performance.now()){
+    const state=visibleWorld[playerId]; if(!state) return null;
+    const track=remoteRenderState[playerId]; if(!track) return state;
+    const progress=Math.max(0,Math.min(1,(now-track.startedAt)/track.duration));
+    const eased=progress*progress*(3-2*progress);
+    return {x:track.fromX+(track.toX-track.fromX)*eased,y:track.fromY+(track.toY-track.fromY)*eased};
 }
-function evalMove(movement,now){ const progress=Math.max(0,Math.min(1,(now-movement.startTime)/movement.naturalDuration)); const eased=progress<.5?2*progress*progress:1-Math.pow(-2*progress+2,2)/2; return {x:movement.startX+(movement.targetX-movement.startX)*eased,y:movement.startY+(movement.targetY-movement.startY)*eased,finished:progress>=1||now>=movement.hardStopAt}; }
-function getRenderPosition(playerId){ const state=visibleWorld[playerId]; if(!state) return null; const movement=moveState[playerId]; return movement?evalMove(movement,performance.now()):state; }
+function queueRemoteRenderTarget(playerId,state,{snap=false}={}){
+    if(playerId===myId||!state||![state.x,state.y].every(Number.isFinite)) return;
+    const now=performance.now();
+    const current=sampleRemoteRender(playerId,now)||state;
+    const existing=remoteRenderState[playerId];
+    if(existing&&Math.abs(existing.toX-state.x)<1e-6&&Math.abs(existing.toY-state.y)<1e-6) return;
+    const distance=Math.hypot(state.x-current.x,state.y-current.y);
+    if(snap||distance>REMOTE_SNAP_DISTANCE){
+        remoteRenderState[playerId]={fromX:state.x,fromY:state.y,toX:state.x,toY:state.y,startedAt:now,duration:1};
+        return;
+    }
+    remoteRenderState[playerId]={fromX:current.x,fromY:current.y,toX:state.x,toY:state.y,startedAt:now,duration:REMOTE_INTERPOLATION_MS};
+}
+function getRenderPosition(playerId){
+    if(playerId===myId){
+        const state=getPredictedTail(myId)||visibleWorld[myId]; if(!state) return null;
+        const movement=moveState[myId]; return movement?evalMove(movement,performance.now()):state;
+    }
+    return sampleRemoteRender(playerId);
+}
 function tickMovement(){
+    if(!roomReady) return;
     const now=performance.now(); const movement=moveState[myId]; if(!movement) return;
     const me=getPredictedTail(myId); if(!me?.alive){ delete moveState[myId]; return; }
     const evaluated=evalMove(movement,now),dx=evaluated.x-movement.lastX,dy=evaluated.y-movement.lastY;
-    if(Math.abs(dx)>.05||Math.abs(dy)>.05) executeLocal(makeMoveCommand(dx,dy));
+    const shouldEmit=evaluated.finished?(Math.abs(dx)>1e-6||Math.abs(dy)>1e-6):(Math.abs(dx)>.05||Math.abs(dy)>.05);
+    if(shouldEmit) executeLocal(makeMoveCommand(dx,dy));
     movement.lastX=evaluated.x; movement.lastY=evaluated.y; if(evaluated.finished) delete moveState[myId];
 }
 function tickCombat(){
+    if(!roomReady) return;
     const me=getPredictedTail(myId); if(!me) return;
     if(!me.alive){ delete moveState[myId]; const confirmed=confirmedWorld[myId]; if(confirmed&&!hasPendingType(myId,'respawn')&&performance.now()-(confirmed.deadObservedAt||0)>=RESPAWN_MS) executeLocal(makeRespawnCommand()); return; }
     if(me.hp<MAX_HP&&!hasPendingType(myId,'heal')){ const activity=activityAnchors.get(myId); const idleMs=activity?performance.now()-Math.max(activity.lastMoveAt,activity.lastDamageAt,activity.lastHealAt):0; if(idleMs>=1000) executeLocal(makeHealCommand()); }
@@ -672,15 +875,17 @@ function sendSnapshot(remoteId){
 }
 function receiveSnapshot(remoteId,snapshot){
     if(!snapshot||snapshot.protocol!==PROTOCOL||snapshot.senderId!==remoteId||!snapshot.state) return;
+    relayWorld.delete(remoteId);
     const state=snapshot.state;
     if(![state.x,state.y].every(Number.isFinite)||!Number.isSafeInteger(state.sequence)||!Number.isSafeInteger(state.lifeId)||!Number.isSafeInteger(state.hp)) return;
     const localSeq=confirmedSeq.get(remoteId)||0; if(state.sequence<localSeq) return;
     const normalized={...state,color:state.color||colorFor(remoteId),hp:Math.max(0,Math.min(MAX_HP,state.hp)),alive:Boolean(state.alive),deadObservedAt:state.alive?0:performance.now(),tentative:false};
     confirmedWorld[remoteId]=normalized; visibleWorld[remoteId]={...normalized}; confirmedSeq.set(remoteId,normalized.sequence);
+    queueRemoteRenderTarget(remoteId,normalized,{snap:true});
     const now=performance.now();
     tickAnchors.set(remoteId,{remoteTick:Number.isSafeInteger(snapshot.clockTick)?snapshot.clockTick:normalized.tick,localTime:now});
     activityAnchors.set(remoteId,{lastMoveAt:now,lastDamageAt:now,lastHealAt:now});
-    log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence} hp=${normalized.hp} alive=${normalized.alive}`);
+    log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence} alive=${normalized.alive}`);
 }
 
 function byteLength(text){ return new TextEncoder().encode(text).byteLength; }
@@ -699,42 +904,66 @@ function handleWireMessage(remoteId,raw){
     if(message.kind==='command') receiveCommand(remoteId,message.command);
     else if(message.kind==='receipt') receiveReceipt(remoteId,message.receipt);
     else if(message.kind==='snapshot') receiveSnapshot(remoteId,message.snapshot);
-    else if(message.kind==='moveIntent') receiveMoveIntent(remoteId,message.intent);
+    else if(message.kind==='neighborDigest') receiveNeighborDigest(remoteId,message.digest);
     else invalidCounter++;
 }
 
+function setRoomGate(state,title,detail=''){
+    roomGate.dataset.state=state;
+    roomGateTitle.textContent=title;
+    roomGateDetail.textContent=detail;
+    roomGate.classList.toggle('hidden',state==='ready');
+    roomGate.setAttribute('aria-busy',state==='ready'?'false':'true');
+}
+function markRoomUnavailable(title,detail){ roomReady=false; setRoomGate('error',title,detail); }
 function updateSignalStatus(state,label=state){ const el=document.getElementById('signalState'); el.dataset.state=state; el.textContent=label; }
 function signalLog(className,message,detail=null){ const line=`[SIGNAL] ${message}`; log(className,line); const method=className==='t-err'?'error':className==='t-sig'?'info':'debug'; detail==null?console[method](line):console[method](line,detail); }
 function startSignaling(){
-    if(!SIGNAL_URL){ updateSignalStatus('error','missing signal URL'); signalLog('t-err','signal query parameter is required'); return; }
+    if(!SIGNAL_URL){ updateSignalStatus('error','missing signal URL'); markRoomUnavailable('방 확인 실패','signal 쿼리 파라미터가 없습니다.'); signalLog('t-err','signal query parameter is required'); return; }
     signalManualClose=false; connectSignaling();
 }
 function connectSignaling(){
     if(signalManualClose||!SIGNAL_URL) return;
     if(signalingSocket&&[WebSocket.CONNECTING,WebSocket.OPEN].includes(signalingSocket.readyState)) return;
-    clearTimeout(signalReconnectTimer); clearTimeout(signalConnectTimeout); const generation=++signalingGeneration;
+    clearTimeout(signalReconnectTimer); clearTimeout(signalConnectTimeout); clearTimeout(roomJoinTimeout); roomReady=false; const generation=++signalingGeneration;
+    setRoomGate('checking','방 확인 중',`시그널 서버 연결 중 · ${ROOM_ID}`);
     updateSignalStatus('connecting','connecting'); signalLog('t-sig',`connecting url=${SIGNAL_URL} room=${ROOM_ID} attempt=${signalReconnectAttempt+1}`);
     let socket; try{ socket=new WebSocket(SIGNAL_URL); }catch(error){ signalLog('t-err',`constructor failed: ${error.message}`); scheduleReconnect('constructor failure'); return; }
     signalingSocket=socket;
     signalConnectTimeout=setTimeout(()=>{ if(generation===signalingGeneration&&socket.readyState===WebSocket.CONNECTING) try{socket.close(4000,'connect timeout');}catch(_){} },SIGNAL_CONNECT_TIMEOUT_MS);
     socket.onopen=()=>{
-        if(generation!==signalingGeneration) return; clearTimeout(signalConnectTimeout); signalReconnectAttempt=0; updateSignalStatus('open','open'); signalLog('t-sig',`open url=${SIGNAL_URL}`);
-        socket.send(JSON.stringify({type:'join',channelId:ROOM_ID,peerId:myId,signalProtocol:SIGNAL_PROTOCOL})); signalLog('t-sig',`join sent room=${ROOM_ID} peer=${myId}`); sendSignal({type:'announce'});
-        clearInterval(signalKeepaliveTimer); signalKeepaliveTimer=setInterval(()=>sendSignal({type:'keepalive',to:myId}),SIGNAL_KEEPALIVE_MS);
+        if(generation!==signalingGeneration) return; clearTimeout(signalConnectTimeout); signalReconnectAttempt=0; updateSignalStatus('joining','checking room'); signalLog('t-sig',`open url=${SIGNAL_URL}`);
+        setRoomGate('checking','방 확인 중',`방 ${ROOM_ID} 참가 확인을 기다리는 중입니다.`);
+        socket.send(JSON.stringify({type:'join',channelId:ROOM_ID,peerId:myId,signalProtocol:SIGNAL_PROTOCOL})); signalLog('t-sig',`join sent room=${ROOM_ID} peer=${myId}`);
+        roomJoinTimeout=setTimeout(()=>{ if(generation===signalingGeneration&&!roomReady){ markRoomUnavailable('방 확인 시간 초과','서버가 join 확인 응답을 보내지 않았습니다. 시그널 서버 v2 배포가 필요합니다.'); signalLog('t-err','room join acknowledgement timeout'); } },ROOM_JOIN_TIMEOUT_MS);
     };
     socket.onmessage=event=>{ if(generation!==signalingGeneration||typeof event.data!=='string') return; try{ handleSignalMessage(JSON.parse(event.data)); }catch(error){ signalLog('t-err',`invalid signaling JSON: ${error.message}`); } };
-    socket.onerror=event=>{ if(generation!==signalingGeneration) return; updateSignalStatus('error','error'); signalLog('t-err','WebSocket error',event); };
-    socket.onclose=event=>{ if(generation!==signalingGeneration) return; clearTimeout(signalConnectTimeout); clearInterval(signalKeepaliveTimer); signalingSocket=null; updateSignalStatus('closed',`closed ${event.code}`); signalLog(signalManualClose?'t-sys':'t-err',`closed code=${event.code} reason=${event.reason||'none'}`); scheduleReconnect(`close ${event.code}`); };
+    socket.onerror=event=>{ if(generation!==signalingGeneration) return; roomReady=false; updateSignalStatus('error','error'); setRoomGate('checking','연결 재시도 중','시그널 서버 연결 오류가 발생했습니다.'); signalLog('t-err','WebSocket error',event); };
+    socket.onclose=event=>{ if(generation!==signalingGeneration) return; clearTimeout(signalConnectTimeout); clearTimeout(roomJoinTimeout); clearInterval(signalKeepaliveTimer); roomReady=false; signalingSocket=null; setRoomGate('checking','방 연결 복구 중',`연결 종료 코드 ${event.code} · 재접속을 준비합니다.`); updateSignalStatus('closed',`closed ${event.code}`); signalLog(signalManualClose?'t-sys':'t-err',`closed code=${event.code} reason=${event.reason||'none'}`); scheduleReconnect(`close ${event.code}`); };
 }
 function sendSignal(message){
-    if(signalingSocket?.readyState!==WebSocket.OPEN) return false;
+    if(signalingSocket?.readyState!==WebSocket.OPEN||!roomReady) return false;
     try{ signalingSocket.send(JSON.stringify({...message,from:myId,signalProtocol:SIGNAL_PROTOCOL,signalTick:currentTick()})); return true; }catch(error){ signalLog('t-err',`send failed type=${message.type}: ${error.message}`); return false; }
 }
 function scheduleReconnect(reason){
     if(signalManualClose) return; clearTimeout(signalReconnectTimer); const base=Math.min(SIGNAL_RECONNECT_MAX_MS,SIGNAL_RECONNECT_BASE_MS*(2**Math.min(signalReconnectAttempt,6))); const delay=Math.round(base*(.85+Math.random()*.3)); signalReconnectAttempt++; updateSignalStatus('reconnecting',`retry ${Math.ceil(delay/1000)}s`); signalLog('t-sig',`reconnect in ${delay}ms reason=${reason}`); signalReconnectTimer=setTimeout(connectSignaling,delay);
 }
 async function handleSignalMessage(message){
-    if(!message||message.from===myId||typeof message.from!=='string'||(message.to&&message.to!==myId)) return;
+    if(!message) return;
+    if(message.type==='joined'){
+        if(message.signalProtocol!==SIGNAL_PROTOCOL||message.channelId!==ROOM_ID||message.peerId!==myId){ markRoomUnavailable('방 확인 응답 불일치','서버가 다른 방 또는 프로토콜의 응답을 보냈습니다.'); return; }
+        clearTimeout(roomJoinTimeout); roomReady=true; updateSignalStatus('open','joined');
+        const roomResult=message.roomExisted?'기존 방 확인됨':'새 방 생성됨';
+        setRoomGate('ready',roomResult,`현재 참가자 ${message.peerCount}명`);
+        signalLog('t-sig',`joined room=${ROOM_ID} existed=${Boolean(message.roomExisted)} peers=${message.peerCount}`);
+        sendSignal({type:'announce'});
+        clearInterval(signalKeepaliveTimer); signalKeepaliveTimer=setInterval(()=>sendSignal({type:'keepalive',to:myId}),SIGNAL_KEEPALIVE_MS);
+        return;
+    }
+    if(message.type==='join-error'){
+        clearTimeout(roomJoinTimeout); markRoomUnavailable('방 확인 실패',message.reason||'서버가 참가를 거절했습니다.'); updateSignalStatus('error','join rejected'); signalLog('t-err',`join rejected: ${message.reason||'unknown'}`); return;
+    }
+    if(!roomReady||message.from===myId||typeof message.from!=='string'||(message.to&&message.to!==myId)) return;
     try{
         if(message.type==='announce'){
             signalLog('t-sig',`announce received from=${message.from}`);
@@ -749,7 +978,7 @@ async function handleSignalMessage(message){
     }catch(error){ signalLog('t-err',`handling failed type=${message.type} from=${message.from}: ${error.message}`); }
 }
 function reconnectSignaling(){
-    clearTimeout(signalReconnectTimer); clearTimeout(signalConnectTimeout); clearInterval(signalKeepaliveTimer); signalManualClose=false;
+    clearTimeout(signalReconnectTimer); clearTimeout(signalConnectTimeout); clearTimeout(roomJoinTimeout); clearInterval(signalKeepaliveTimer); roomReady=false; setRoomGate('checking','방 확인 중',`방 ${ROOM_ID}에 다시 연결합니다.`); signalManualClose=false;
     const old=signalingSocket; signalingSocket=null; signalingGeneration++; try{old?.close(1000,'manual reconnect');}catch(_){} signalReconnectAttempt=0; connectSignaling();
 }
 window.reconnectSignaling=reconnectSignaling;
@@ -770,12 +999,12 @@ async function createPeer(remoteId,isOfferer,remoteSdp){
     };
     const bindChannel=dc=>{
         entry.dc=dc;
-        dc.onopen=()=>{ if(pageUnloading||peers.get(remoteId)!==entry) return; log('t-sig',`DataChannel open ↔ ${remoteId}`); refreshMembership('data channel open'); sendSnapshot(remoteId); updatePeerList(); };
+        dc.onopen=()=>{ if(pageUnloading||peers.get(remoteId)!==entry) return; log('t-sig',`DataChannel open ↔ ${remoteId}`); refreshMembership('data channel open'); relayWorld.delete(remoteId); sendSnapshot(remoteId); sendNeighborDigest(remoteId); updatePeerList(); };
         dc.onmessage=event=>{ if(!pageUnloading&&peers.get(remoteId)===entry) handleWireMessage(remoteId,event.data); };
         dc.onclose=()=>{ if(!pageUnloading&&peers.get(remoteId)===entry) removePeer(remoteId,'data channel closed'); };
         dc.onerror=event=>{ if(!pageUnloading) log('t-err',`DataChannel error ↔ ${remoteId}: ${event?.message||'unknown'}`); };
     };
-    if(isOfferer){ bindChannel(pc.createDataChannel('arena-v8',{ordered:true})); const offer=await pc.createOffer(); await pc.setLocalDescription(offer); sendSignal({type:'offer',to:remoteId,sdp:offer}); }
+    if(isOfferer){ bindChannel(pc.createDataChannel('arena-v12',{ordered:true})); const offer=await pc.createOffer(); await pc.setLocalDescription(offer); sendSignal({type:'offer',to:remoteId,sdp:offer}); }
     else{ pc.ondatachannel=event=>bindChannel(event.channel); await pc.setRemoteDescription(remoteSdp); await flushIce(entry); const answer=await pc.createAnswer(); await pc.setLocalDescription(answer); sendSignal({type:'answer',to:remoteId,sdp:answer}); }
     updatePeerList();
 }
@@ -786,7 +1015,7 @@ function removePeer(remoteId,reason='unknown'){
         if(peer.dc){ peer.dc.onopen=peer.dc.onmessage=peer.dc.onclose=peer.dc.onerror=null; }
         if(peer.pc){ peer.pc.onicecandidate=peer.pc.onconnectionstatechange=peer.pc.ondatachannel=null; }
         try{ if(peer.dc?.readyState!=='closed') peer.dc?.close(); }catch(_){} try{ if(peer.pc?.connectionState!=='closed') peer.pc?.close(); }catch(_){}
-        delete confirmedWorld[remoteId]; delete visibleWorld[remoteId]; delete moveState[remoteId]; delete hitFlashes[remoteId]; confirmedSeq.delete(remoteId); tickAnchors.delete(remoteId); activityAnchors.delete(remoteId); prePeerIce.delete(remoteId);
+        delete confirmedWorld[remoteId]; delete visibleWorld[remoteId]; delete moveState[remoteId]; delete remoteRenderState[remoteId]; delete hitFlashes[remoteId]; confirmedSeq.delete(remoteId); tickAnchors.delete(remoteId); activityAnchors.delete(remoteId); prePeerIce.delete(remoteId);
         for(const [id,pending] of [...pendingById]) if(pending.command.playerId===remoteId){ clearTimeout(pending.timeoutId); pendingById.delete(id); }
         pendingOrderByPlayer.delete(remoteId);
         if(!pageUnloading){ if(wasMember) refreshMembership('peer removed'); updatePeerList(); log('t-sys',`peer removed ↔ ${remoteId} (${reason})`); }
@@ -797,31 +1026,42 @@ function removePeer(remoteId,reason='unknown'){
 function resizeCanvas(){ canvas.width=canvas.clientWidth*devicePixelRatio; canvas.height=canvas.clientHeight*devicePixelRatio; context.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
 window.addEventListener('resize',resizeCanvas); resizeCanvas();
 canvas.addEventListener('click',event=>{
+    if(!roomReady) return;
     const me=getPredictedTail(myId); if(!me?.alive) return; const rect=canvas.getBoundingClientRect(); const render=getRenderPosition(myId)||me; const dx=event.clientX-rect.left-render.x,dy=event.clientY-rect.top-render.y,distance=Math.hypot(dx,dy)||1; executeLocal(makeShootCommand(dx/distance,dy/distance));
 });
 canvas.addEventListener('contextmenu',event=>{
-    event.preventDefault(); const me=getPredictedTail(myId); if(!me?.alive) return; const rect=canvas.getBoundingClientRect(); const render=getRenderPosition(myId)||me; startMove(myId,render.x,render.y,event.clientX-rect.left,event.clientY-rect.top);
+    event.preventDefault(); if(!roomReady) return; const me=getPredictedTail(myId); if(!me?.alive) return; const rect=canvas.getBoundingClientRect(); const render=getRenderPosition(myId)||me; startMove(myId,render.x,render.y,event.clientX-rect.left,event.clientY-rect.top);
 });
 window.addEventListener('keydown',event=>{
+    if(!roomReady) return;
     let dx=0,dy=0; const step=16; if(event.key==='ArrowUp')dy=-step; else if(event.key==='ArrowDown')dy=step; else if(event.key==='ArrowLeft')dx=-step; else if(event.key==='ArrowRight')dx=step; else return;
     event.preventDefault(); const me=getPredictedTail(myId); if(!me?.alive) return; delete moveState[myId]; executeLocal(makeMoveCommand(dx,dy));
 });
 
 function draw(){
     const width=canvas.clientWidth,height=canvas.clientHeight; context.clearRect(0,0,width,height); const now=performance.now();
-    const localRender=getRenderPosition(myId); if(localRender){ context.beginPath(); context.arc(localRender.x,localRender.y,AOI_RADIUS,0,Math.PI*2); context.strokeStyle='rgba(61,220,151,.16)'; context.lineWidth=1; context.setLineDash([6,6]); context.stroke(); context.setLineDash([]); }
+    const localRender=getRenderPosition(myId); if(localRender){ context.beginPath(); context.arc(localRender.x,localRender.y,AOI_RADIUS,0,Math.PI*2); context.strokeStyle='rgba(61,220,151,.32)'; context.lineWidth=1.5; context.setLineDash([6,6]); context.stroke(); context.setLineDash([]); }
     for(let i=bullets.length-1;i>=0;i--){ const bullet=bullets[i],age=now-bullet.born; if(age>BULLET_TRAIL_MS){ bullets.splice(i,1); continue; } context.globalAlpha=1-age/BULLET_TRAIL_MS; context.strokeStyle=bullet.color; context.lineWidth=1.5; context.beginPath(); context.moveTo(bullet.x1,bullet.y1); context.lineTo(bullet.x2,bullet.y2); context.stroke(); context.globalAlpha=1; }
+    // 1.5-hop 상태는 발견/사전 로딩용 유령 표시일 뿐, 전투 판정에는 절대 들어가지 않는다.
+    const localState=visibleWorld[myId];
+    for(const entry of relayWorld.values()){
+        if(!localState||entry.expiresAt<=now||distanceBetweenStates(localState,entry)>RELAY_PREFETCH_RADIUS) continue;
+        context.save(); context.setLineDash([3,4]); context.strokeStyle='rgba(122,165,255,.72)'; context.lineWidth=1.5; context.beginPath(); context.arc(entry.x,entry.y,8,0,Math.PI*2); context.stroke(); context.restore();
+        context.font='9px monospace'; context.fillStyle='rgba(122,165,255,.8)'; context.fillText(`${entry.ownerId} · relay via ${entry.sourcePeerId}`,entry.x+11,entry.y+3);
+    }
     for(const playerId in visibleWorld){
         const state=visibleWorld[playerId],render=getRenderPosition(playerId); if(!render) continue; const isMe=playerId===myId; if(!isMe&&!isInLocalAoi(playerId)) continue; const flashing=now<(hitFlashes[playerId]||0),pending=(pendingOrderByPlayer.get(playerId)||[]).length>0;
         context.beginPath(); context.arc(render.x,render.y,isMe?9:7,0,Math.PI*2); context.fillStyle=!state.alive?getComputedStyle(document.documentElement).getPropertyValue('--dead'):flashing?'#fff':state.color||'#888'; context.fill();
         if(pending){ context.lineWidth=2; context.strokeStyle='#f2a93b'; context.stroke(); } else if(isMe){ context.lineWidth=2; context.strokeStyle='#fff'; context.stroke(); }
-        context.font='10px monospace'; context.fillStyle='#8fa3b0'; const hp=state.alive?`HP ${state.hp}/${MAX_HP}`:`DEAD ${Math.max(0,Math.ceil((RESPAWN_MS-(now-(state.deadObservedAt||now)))/1000))}s`; context.fillText(`${playerId}${isMe?' (you)':''} · ${hp}`,render.x+12,render.y+4);
+        context.font='10px monospace'; context.fillStyle='#8fa3b0'; const statusLabel=state.alive?'':` · DEAD ${Math.max(0,Math.ceil((RESPAWN_MS-(now-(state.deadObservedAt||now)))/1000))}s`; context.fillText(`${playerId}${isMe?' (you)':''}${statusLabel}`,render.x+12,render.y+4);
         if(state.alive){ const barWidth=34; context.fillStyle='rgba(28,39,51,.9)'; context.fillRect(render.x-barWidth/2,render.y-17,barWidth,4); context.fillStyle=state.hp===1?'#ef5b6e':state.hp===2?'#f2a93b':'#3ddc97'; context.fillRect(render.x-barWidth/2,render.y-17,barWidth*(state.hp/MAX_HP),4); }
     }
     updateOverlay(); requestAnimationFrame(draw);
 }
 function updateOverlay(){
-    const me=visibleWorld[myId]; if(!me) return; document.getElementById('healthValue').innerHTML=`HP <strong>${me.hp} / ${MAX_HP}</strong>`; const status=document.getElementById('localStatus');
+    const me=visibleWorld[myId]; if(!me) return;
+    document.querySelectorAll('#healthMeter .healthPip').forEach((pip,index)=>{ pip.classList.toggle('on',me.alive&&index<me.hp); pip.dataset.level=String(Math.max(1,me.hp)); });
+    const status=document.getElementById('localStatus');
     if(me.alive){ status.textContent='alive'; status.style.color='var(--accent)'; }
     else{ const remain=Math.max(0,Math.ceil((RESPAWN_MS-(performance.now()-(me.deadObservedAt||performance.now())))/1000)); status.textContent=`dead · respawn ${remain}s`; status.style.color='var(--err)'; }
 }
@@ -866,7 +1106,7 @@ function shutdown(){
     if(pageUnloading) return; pageUnloading=true; signalManualClose=true;
     for(const [id] of peers) sendSignal({type:'leave',to:id});
     for(const [id] of [...peers]) removePeer(id,'page unload');
-    clearTimeout(signalReconnectTimer); clearTimeout(signalConnectTimeout); clearInterval(signalKeepaliveTimer); try{signalingSocket?.close(1000,'page unload');}catch(_){}
+    clearTimeout(signalReconnectTimer); clearTimeout(signalConnectTimeout); clearTimeout(roomJoinTimeout); clearInterval(signalKeepaliveTimer); try{signalingSocket?.close(1000,'page unload');}catch(_){}
 }
 window.addEventListener('pagehide',shutdown); window.addEventListener('beforeunload',shutdown);
 
@@ -874,6 +1114,7 @@ setInterval(tickMovement,STEP_INTERVAL_MS);
 setInterval(tickCombat,100);
 setInterval(renderLogs,150);
 setInterval(updateKda,1000);
+setInterval(()=>{ pruneRelayWorld(); broadcastNeighborDigests(); },RELAY_INTERVAL_MS);
 setInterval(()=>document.getElementById('tick').textContent=`TICK ${currentTick()}`,100);
 setInterval(()=>{
     const descriptor=membershipDescriptor();
@@ -886,16 +1127,57 @@ setInterval(()=>{
     document.getElementById('rejectedStat').textContent=rejectedCounter;
     document.getElementById('stalledStat').textContent=stalledCounter;
     document.getElementById('membershipMismatchStat').textContent=membershipMismatchCounter;
+    const relayVisible=[...relayWorld.values()].filter(entry=>entry.expiresAt>performance.now()).length;
+    document.getElementById('relayStat').textContent=`${relayVisible} / ${directOpenPeerIds().length}`;
     document.getElementById('trafficStat').textContent=`${(networkMetrics.txBytes/1024).toFixed(1)} / ${(networkMetrics.rxBytes/1024).toFixed(1)} KB`;
     document.getElementById('messageRateStat').textContent=`${networkMetrics.txRate} / ${networkMetrics.rxRate}`;
     const avg=commitLatencySamples.length?commitLatencySamples.reduce((a,b)=>a+b,0)/commitLatencySamples.length:null;
     document.getElementById('commitLatencyStat').textContent=avg==null?'-':`${avg.toFixed(0)} ms`;
     document.getElementById('checkpointStat').textContent=`${networkMetrics.lastCheckpointPlayers} players`;
+    document.getElementById('relayMetricStat').textContent=`${relayAcceptedCounter} / ${relayDroppedCounter}`;
 },500);
 setInterval(()=>{ if(signalingSocket?.readyState===WebSocket.OPEN) sendSignal({type:'announce'}); },3000);
 setInterval(()=>{ networkMetrics.txRate=networkMetrics.txMessagesWindow; networkMetrics.rxRate=networkMetrics.rxMessagesWindow; networkMetrics.txByteRate=networkMetrics.txBytesWindow; networkMetrics.rxByteRate=networkMetrics.rxBytesWindow; networkMetrics.txMessagesWindow=networkMetrics.rxMessagesWindow=networkMetrics.txBytesWindow=networkMetrics.rxBytesWindow=0; },1000);
 
-log('t-sys',`local peer boot id=${myId} protocol=${PROTOCOL} room=${ROOM_ID} aoi=${AOI_RADIUS} committee=${COMMITTEE_SIZE}`);
+log('t-sys',`local peer boot id=${myId} protocol=${PROTOCOL} signalProtocol=${SIGNAL_PROTOCOL} room=${ROOM_ID} aoi=${AOI_RADIUS} committee=${COMMITTEE_SIZE} relay=1.5-hop`);
+</script>
+
+<script type="application/json" id="architectureIdeaIndex">
+{
+  "implemented": [
+    "WebSocket signaling and WebRTC data channels",
+    "sequenced tentative-to-confirmed commands",
+    "committee receipts with in-order commit",
+    "AOI-scoped combat checkpoint",
+    "authoritative remote interpolation",
+    "discovery-only 1.5-hop relay with TTL, deduplication, and no re-relay",
+    "room join acknowledgement gate before rendering and input",
+    "speed-preserving retarget with explicit acceleration, cruise, and braking phases"
+  ],
+  "topologyIdeas": [
+    "direct near-neighbor set",
+    "skip-group or bridge neighbors for cross-cluster reachability",
+    "1.5-hop summaries for prefetch and neighbor discovery",
+    "future direct-link degree cap and certified handoff"
+  ],
+  "trustIdeas": [
+    "server-issued identity",
+    "signed membership epoch",
+    "unpredictable validator seed",
+    "Sybil resistance",
+    "certificate-carrying owner state"
+  ],
+  "stateClasses": {
+    "authoritative": "direct verified commands and confirmed state",
+    "tentative": "direct commands waiting for committee receipts",
+    "relaySummary": "indirect discovery-only state; never combat, HP, inventory, or currency authority"
+  },
+  "skipGroupOverlap": {
+    "sharedPurpose": "reachability and prefetch beyond the immediate neighborhood",
+    "difference": "skip groups choose bridge edges; 1.5-hop relay chooses which summaries cross direct edges",
+    "combinedShape": "near neighbors plus bridge neighbors plus non-recursive 1.5-hop summaries"
+  }
+}
 </script>
 </body>
 </html>
