@@ -3,66 +3,84 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Distributed World Runtime — Hardened P2P Demo v5</title>
+<title>P2P Arena — AOI Committee Protocol v8</title>
 <style>
 :root{
     --bg:#0a0e12;--panel:#10161c;--line:#1c2733;--grid:#141b22;
     --fg:#c9d6e0;--dim:#5c7284;--accent:#3ddc97;--warn:#f2a93b;
-    --err:#ef5b6e;--audit:#7aa5ff;--tentative:#f2a93b;
+    --err:#ef5b6e;--audit:#7aa5ff;--dead:#7e8790;
     --mono:"JetBrains Mono","SF Mono",Consolas,monospace;
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--fg);font-family:var(--mono);display:flex;flex-direction:column;overflow:hidden}
-header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px;flex-shrink:0}
+header{height:42px;padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-shrink:0}
 header h1{font-size:13px;letter-spacing:.08em;font-weight:600;margin:0;text-transform:uppercase}
-header .sub{font-size:11px;color:var(--dim)}
-#tick{margin-left:auto;font-size:11px;color:var(--accent)}
+header .sub{font-size:10.5px;color:var(--dim)}
+#tick{margin-left:auto;font-size:10.5px;color:var(--accent)}
 main{flex:1;display:flex;min-height:0}
-#stage{flex:1;position:relative;background:linear-gradient(var(--grid) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(90deg,var(--grid) 1px,transparent 1px) 0 0/32px 32px,var(--bg)}
+#stage{flex:1;position:relative;overflow:hidden;background:linear-gradient(var(--grid) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(90deg,var(--grid) 1px,transparent 1px) 0 0/32px 32px,var(--bg)}
 canvas{display:block;width:100%;height:100%}
-#hint{position:absolute;bottom:10px;left:14px;font-size:10.5px;color:var(--dim);line-height:1.6;max-width:calc(100% - 30px)}
+#hint{position:absolute;bottom:10px;left:14px;font-size:10px;color:var(--dim);line-height:1.6;pointer-events:none}
+.overlay{position:absolute;top:12px;z-index:3;background:rgba(10,14,18,.86);border:1px solid var(--line);border-radius:5px;backdrop-filter:blur(4px)}
+#kdaOverlay{left:12px;width:208px;padding:10px 12px}
+.overlayTitle{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+#kdaValue{font-size:19px;letter-spacing:.08em;color:var(--fg)}
+#kdaValue b{color:var(--accent);font-weight:600}
+#healthValue{margin-top:7px;font-size:10.5px;color:var(--dim)}
+#healthValue strong{color:var(--fg)}
+#killFeed{right:12px;width:290px;max-height:220px;padding:9px 10px;overflow:hidden}
+.killRow{font-size:10.5px;padding:5px 2px;border-top:1px dashed rgba(92,114,132,.22);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.killRow:first-of-type{border-top:none}
+.killKiller{color:var(--accent)}
+.killVictim{color:var(--err)}
+.killAssist{color:var(--dim);font-size:9.5px}
+.killEmpty{font-size:10px;color:var(--dim);padding:3px 2px}
 aside{width:370px;border-left:1px solid var(--line);display:flex;flex-direction:column;background:var(--panel);flex-shrink:0}
 .block{border-bottom:1px solid var(--line);padding:10px 14px}
 .block h2{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:0 0 8px}
-.row{display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0;gap:10px}.row span:first-child{color:var(--dim)}
+.row{display:flex;justify-content:space-between;font-size:11px;padding:2px 0;gap:10px}.row span:first-child{color:var(--dim)}
 #peerId{color:var(--accent)}
-#peerList{max-height:145px;overflow:auto;font-size:11.5px}.peerRow{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed var(--line)}
+#peerList{max-height:125px;overflow:auto;font-size:11px}.peerRow{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed var(--line)}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
-button,input{font-family:var(--mono);font-size:11px}
-button{cursor:pointer;border-radius:3px;padding:5px 7px}
-.btnPrimary{background:var(--accent);border:none;color:#04120a;font-weight:600}.btnGhost{background:transparent;border:1px solid var(--line);color:var(--dim)}
-.controls{display:flex;gap:6px;margin-bottom:8px}.controls input{width:70px;background:var(--bg);border:1px solid var(--line);color:var(--fg);padding:4px}
-#log{flex:1;overflow:auto;font-size:10.5px;padding:8px 14px 10px;line-height:1.55}
-#log div{margin-bottom:2px;white-space:pre-wrap;word-break:break-word}.t-sig{color:var(--warn)}.t-cmd{color:var(--accent)}.t-audit{color:var(--audit)}.t-warn{color:var(--warn)}.t-err{color:var(--err)}.t-sys{color:var(--dim)}
-.logToolbar{display:flex;flex-wrap:wrap;gap:4px;padding-bottom:8px;border-bottom:1px solid var(--line)}
-.logFilter{background:transparent;border:1px solid var(--line);color:var(--dim);padding:3px 6px;font-size:9.5px}
-.logFilter:hover{color:var(--fg);border-color:var(--dim)}
-.logFilter.active{color:var(--fg);border-color:var(--accent);background:rgba(61,220,151,.08)}
-.logFilter[data-filter="error"].active{border-color:var(--err);background:rgba(239,91,110,.08)}
-.logFilter[data-filter="warn"].active{border-color:var(--warn);background:rgba(242,169,59,.08)}
-.logFilter .count{opacity:.75;margin-left:2px}
-.logToolbar .spacer{flex:1}
-#logEmpty{display:none;color:var(--dim);padding:12px 0;text-align:center}
-.legend{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10px;color:var(--dim)}
-.badge{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-radius:9px;font-size:9px;margin-left:4px}
+button{font-family:var(--mono);font-size:10px;cursor:pointer;border-radius:3px;padding:4px 6px;background:transparent;border:1px solid var(--line);color:var(--dim)}
+button:hover{color:var(--fg);border-color:var(--dim)}
 #signalState[data-state="open"]{color:var(--accent)}
 #signalState[data-state="connecting"],#signalState[data-state="reconnecting"]{color:var(--warn)}
 #signalState[data-state="error"],#signalState[data-state="closed"]{color:var(--err)}
-#signalRoom,#signalMode{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#signalRoom{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legend{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9.5px;color:var(--dim)}
+#logBlock{flex:1;display:flex;flex-direction:column;min-height:0;border-bottom:none}
+.logToolbar{display:flex;flex-wrap:wrap;gap:4px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.logFilter.active{color:var(--fg);border-color:var(--accent);background:rgba(61,220,151,.08)}
+.logFilter[data-filter="error"].active{border-color:var(--err);background:rgba(239,91,110,.08)}
+.logFilter[data-filter="warn"].active{border-color:var(--warn);background:rgba(242,169,59,.08)}
+.logToolbar .spacer{flex:1}
+#log{flex:1;overflow:auto;font-size:10px;padding:8px 0 10px;line-height:1.5}
+#log div{margin-bottom:2px;white-space:pre-wrap;word-break:break-word}.t-sig{color:var(--warn)}.t-cmd{color:var(--accent)}.t-audit{color:var(--audit)}.t-warn{color:var(--warn)}.t-err{color:var(--err)}.t-sys{color:var(--dim)}
+#logEmpty{display:none;color:var(--dim);padding:12px 0;text-align:center}
 ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
 </style>
 </head>
 <body>
 <header>
-    <h1>Distributed World Runtime</h1>
-    <span class="sub">WebRTC P2P · WebSocket/Broadcast signaling · in-order commit · quorum receipts · idempotent peer teardown</span>
+    <h1>P2P Arena</h1>
+    <span class="sub">WebSocket signaling · WebRTC mesh · AOI checkpoint · deterministic validator committee · combat protocol v8</span>
     <span id="tick">TICK 0</span>
 </header>
 <main>
     <div id="stage">
         <canvas id="canvas"></canvas>
-        <div id="hint">좌클릭: 사격 · 우클릭: 목적지 이동 · 방향키: 즉시 이동 · 주황=쿼럼 대기 · 빨강=stalled · 콘솔 getSignalingState(), reconnectSignaling(), cheatTeleport(), spoofIdentity()</div>
+        <div id="kdaOverlay" class="overlay">
+            <div class="overlayTitle">최근 5분 K / D / A</div>
+            <div id="kdaValue"><b>0</b> / 0 / 0</div>
+            <div id="healthValue">HP <strong>3 / 3</strong></div>
+        </div>
+        <div id="killFeed" class="overlay">
+            <div class="overlayTitle">Kill Feed</div>
+            <div id="killFeedRows"><div class="killEmpty">아직 처치 기록 없음</div></div>
+        </div>
+        <div id="hint">좌클릭: 사격 · 우클릭: 목적지 이동 · 방향키: 즉시 이동 · 원은 AOI 범위 · 3회 피격 시 사망 · 5초 뒤 리스폰 · 1초 정지마다 HP 1 회복</div>
     </div>
     <aside>
         <div class="block">
@@ -70,51 +88,51 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
             <div class="row"><span>id</span><span id="peerId">-</span></div>
             <div class="row"><span>connections</span><span id="connCount">0</span></div>
             <div class="row"><span>membership</span><span id="membershipVersion">0</span></div>
-            <div class="row"><span>role</span><span id="roleTag">Peer</span></div>
+            <div class="row"><span>status</span><span id="localStatus">alive</span></div>
         </div>
         <div class="block">
             <h2>Signaling</h2>
-            <div class="row"><span>mode</span><span id="signalMode">-</span></div>
             <div class="row"><span>room</span><span id="signalRoom">-</span></div>
             <div class="row"><span>state</span><span id="signalState" data-state="closed">idle</span></div>
-            <button class="btnGhost" style="width:100%;margin-top:6px" onclick="reconnectSignaling()">reconnect signaling</button>
+            <button style="width:100%;margin-top:6px" onclick="reconnectSignaling()">reconnect signaling</button>
         </div>
         <div class="block">
             <h2>Connected Peers</h2>
-            <div id="peerList"><span style="color:var(--dim)">다른 탭 대기 중...</span></div>
+            <div id="peerList"><span style="color:var(--dim)">다른 유저 대기 중...</span></div>
         </div>
         <div class="block">
             <h2>Protocol State</h2>
-            <div class="row"><span>confirmed commands</span><span id="confirmedStat">0</span></div>
-            <div class="row"><span>tentative commands</span><span id="tentativeStat">0</span></div>
-            <div class="row"><span>rejected commands</span><span id="rejectedStat">0</span></div>
-            <div class="row"><span>duplicates dropped</span><span id="duplicateStat">0</span></div>
-            <div class="row"><span>invalid messages</span><span id="invalidStat">0</span></div>
+            <div class="row"><span>epoch</span><span id="epochStat">-</span></div>
+            <div class="row"><span>AOI peers</span><span id="aoiPeerStat">0</span></div>
+            <div class="row"><span>committee</span><span id="committeeStat">-</span></div>
+            <div class="row"><span>confirmed</span><span id="confirmedStat">0</span></div>
+            <div class="row"><span>tentative</span><span id="tentativeStat">0</span></div>
+            <div class="row"><span>rejected</span><span id="rejectedStat">0</span></div>
+            <div class="row"><span>stalled</span><span id="stalledStat">0</span></div>
+            <div class="row"><span>membership mismatch</span><span id="membershipMismatchStat">0</span></div>
         </div>
         <div class="block">
-            <h2>Stress Injector</h2>
-            <div class="controls">
-                <input id="botCount" type="number" value="50" min="1" max="1500">
-                <button class="btnPrimary" style="flex:1" onclick="spawnStressBots(parseInt(document.getElementById('botCount').value)||50)">+N local bots</button>
-            </div>
-            <button class="btnGhost" style="width:100%;margin-bottom:8px" onclick="clearStressBots()">clear bots</button>
-            <div class="row"><span>bots</span><span id="botStat">0</span></div>
-            <div class="row"><span>cmds/sec</span><span id="cmdRateStat">0</span></div>
+            <h2>Network Metrics</h2>
+            <div class="row"><span>tx / rx</span><span id="trafficStat">0 / 0 KB</span></div>
+            <div class="row"><span>msg/sec</span><span id="messageRateStat">0 / 0</span></div>
+            <div class="row"><span>avg commit</span><span id="commitLatencyStat">-</span></div>
+            <div class="row"><span>shoot checkpoint</span><span id="checkpointStat">0 players</span></div>
+            <div class="row"><span>identity trust</span><span style="color:var(--warn)">self-issued</span></div>
         </div>
         <div class="block" style="padding-bottom:8px">
             <h2>Legend</h2>
-            <div class="legend"><span>solid: confirmed</span><span>orange ring: tentative</span><span>white ring: local</span><span>red ring: stalled</span></div>
+            <div class="legend"><span>white ring: local</span><span>orange ring: pending</span><span>green circle: AOI</span><span>gray: dead</span></div>
         </div>
-        <div class="block" style="flex:1;display:flex;flex-direction:column;min-height:0;border-bottom:none">
+        <div class="block" id="logBlock">
             <h2>Event / Validation Log</h2>
-            <div class="logToolbar" id="logToolbar">
-                <button class="logFilter active" data-filter="all" onclick="setLogFilter('all')">전체 <span class="count" id="logCountAll">0</span></button>
-                <button class="logFilter" data-filter="error" onclick="setLogFilter('error')">오류 <span class="count" id="logCountError">0</span></button>
-                <button class="logFilter" data-filter="warn" onclick="setLogFilter('warn')">경고 <span class="count" id="logCountWarn">0</span></button>
-                <button class="logFilter" data-filter="signal" onclick="setLogFilter('signal')">시그널 <span class="count" id="logCountSignal">0</span></button>
-                <button class="logFilter" data-filter="command" onclick="setLogFilter('command')">명령 <span class="count" id="logCountCommand">0</span></button>
+            <div class="logToolbar">
+                <button class="logFilter active" data-filter="all" onclick="setLogFilter('all')">전체 <span id="logCountAll">0</span></button>
+                <button class="logFilter" data-filter="error" onclick="setLogFilter('error')">오류 <span id="logCountError">0</span></button>
+                <button class="logFilter" data-filter="warn" onclick="setLogFilter('warn')">경고 <span id="logCountWarn">0</span></button>
+                <button class="logFilter" data-filter="signal" onclick="setLogFilter('signal')">시그널 <span id="logCountSignal">0</span></button>
+                <button class="logFilter" data-filter="combat" onclick="setLogFilter('combat')">전투 <span id="logCountCombat">0</span></button>
                 <span class="spacer"></span>
-                <button class="logFilter" onclick="clearLogs()">지우기</button>
+                <button onclick="clearLogs()">지우기</button>
             </div>
             <div id="log"><div id="logEmpty">선택한 조건의 로그가 없습니다.</div></div>
         </div>
@@ -123,2215 +141,761 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
 <script>
 'use strict';
 
-/*
- * Hardened P2P demo v5
- *
- * 이 파일은 "서버 없는 P2P가 완전한 권위 서버를 대체한다"고 주장하지 않는다.
- * 대신 v2에서 실제로 깨지던 항목을 코드 수준에서 막는다.
- *
- * 1. receipt 도착 순서와 commit 순서를 분리한다.
- * 2. receipt가 command보다 먼저 와도 보관한다.
- * 3. 단일 무작위 validator 대신 membership에 포함된 validator quorum을 사용한다.
- * 4. timeout은 로컬 최종 거절이 아니라 stalled 상태다.
- * 5. snapshot은 송신자 자신의 상태만 전달한다.
- * 6. client tick advance에 상한을 둔다.
- * 7. shoot는 명령에 고정된 confirmed checkpoint를 사용한다.
- * 8. move뿐 아니라 shoot commit도 player sequence를 전진시킨다.
- * 9. signal/room URL 파라미터가 있으면 WebSocket 시그널링 서버에 join한다.
- * 10. WebSocket 연결 상태, 송수신, 오류, 재연결을 화면 로그와 콘솔에 남긴다.
- * 11. signal 파라미터가 없을 때만 BroadcastChannel 로컬 탭 모드로 폴백한다.
- *
- * 남는 한계:
- * - 브라우저 클라이언트만으로 구성된 P2P는 Sybil, 담합, 수정 클라이언트,
- *   신규 참가자 bootstrap 거짓말을 완전히 해결하지 못한다.
- * - production에서는 서명된 identity, 고정 membership epoch, quorum certificate,
- *   authoritative relay/server 또는 별도 consensus 계층이 필요하다.
- */
-
-const PROTOCOL = 6;
+const PROTOCOL = 8;
 const SIGNAL_PROTOCOL = 1;
-const URL_PARAMS = new URLSearchParams(location.search);
-const RAW_SIGNAL_URL = (URL_PARAMS.get('signal') || '').trim();
-const ROOM_ID = sanitizeRoomId(URL_PARAMS.get('room') || 'default');
-const SIGNAL_URL = normalizeSignalUrl(RAW_SIGNAL_URL);
-const SIGNAL_MODE = RAW_SIGNAL_URL ? 'websocket' : 'broadcast-channel';
-const LOCAL_SIGNAL_CHANNEL_NAME = `mmo-p2p-signal-v6:${ROOM_ID}`;
+const params = new URLSearchParams(location.search);
+const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
+const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
+const AOI_RADIUS = clampNumber(params.get('aoi'), 520, 240, 1400);
+const COMMITTEE_SIZE = Math.round(clampNumber(params.get('committee'), 3, 1, 7));
 const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
+const TICK_MS = 1000 / 30;
+const STEP_INTERVAL_MS = 90;
+const BASE_MAX_STEP = 50;
+const STEP_JITTER_ALLOWANCE = 1.35;
+const STEP_EPSILON = 0.75;
+const MAX_TICK_ADVANCE = 120;
+const MAX_RANGE = 450;
+const HIT_RADIUS = 14;
+const MAX_HP = 3;
+const RESPAWN_MS = 5000;
+const REGEN_INTERVAL_TICKS = 30;
+const BULLET_TRAIL_MS = 70;
+const MOVE_SPEED = 220;
+const MOVE_MIN_DURATION = 250;
+const MOVE_MAX_DURATION = 2500;
+const AUDIT_STALL_MS = 1200;
+const DISCONNECT_GRACE_MS = 5000;
 const SIGNAL_CONNECT_TIMEOUT_MS = 45000;
 const SIGNAL_RECONNECT_BASE_MS = 800;
 const SIGNAL_RECONNECT_MAX_MS = 15000;
-const SIGNAL_QUEUE_TTL_MS = 10000;
-const SIGNAL_QUEUE_MAX = 256;
 const SIGNAL_KEEPALIVE_MS = 25000;
-
-const TICK_MS = 1000 / 30;
-const BASE_MAX_STEP = 50;
-const STEP_INTERVAL_MS = 90;
-const STEP_JITTER_ALLOWANCE = 1.35;
-const STEP_EPSILON = 0.75;
-const MAX_TICK_ADVANCE = 120; // 약 4초. 송신자가 임의의 미래 tick으로 이동량을 무한 증폭하지 못하게 한다.
-const MAX_RANGE = 900;
-const HIT_RADIUS = 14;
-const AUDIT_STALL_MS = 1200;
 const ORPHAN_RECEIPT_TTL_MS = 8000;
-const MAX_ORPHAN_COMMANDS = 512;
-const MAX_SEEN_COMMANDS = 10000;
-const MAX_SNAPSHOT_SEQUENCE_JUMP = 10000;
-const MOVE_SPEED = 220;
-const MOVE_MAX_DURATION = 2500;
-const MOVE_MIN_DURATION = 250;
-const DISCONNECT_GRACE_MS = 5000;
-const COLORS = ['#3ddc97', '#f2a93b', '#7aa5ff', '#ef5b6e', '#c77dff', '#4fd6d6', '#e0c341'];
+const KDA_WINDOW_MS = 5 * 60 * 1000;
+const KILL_FEED_LIMIT = 8;
+const COMMIT_LATENCY_SAMPLES = 240;
+const COLORS = ['#3ddc97','#f2a93b','#7aa5ff','#ef5b6e','#c77dff','#4fd6d6','#e0c341'];
 
 const myId = randomId(8);
 const myColor = colorFor(myId);
 const roomEpoch = performance.now();
 
-let localSignalChannel = null;
+const peers = new Map();
+const prePeerIce = new Map();
+const disconnectTimers = new Map();
+const tearingDownPeers = new Set();
+const confirmedWorld = Object.create(null);
+const visibleWorld = Object.create(null);
+const confirmedSeq = new Map();
+const tickAnchors = new Map();
+const activityAnchors = new Map();
+const moveState = Object.create(null);
+const bullets = [];
+const hitFlashes = Object.create(null);
+const pendingById = new Map();
+const pendingOrderByPlayer = new Map();
+const deferredCommands = new Map();
+const seenCommandIds = new Set();
+const seenCommandQueue = [];
+const orphanReceipts = new Map();
+const damageContributors = new Map();
+const killEvents = new Map();
+const commitLatencySamples = [];
+const networkMetrics = {
+    txBytes:0, rxBytes:0, txMessages:0, rxMessages:0,
+    txBytesWindow:0, rxBytesWindow:0, txMessagesWindow:0, rxMessagesWindow:0,
+    txRate:0, rxRate:0, txByteRate:0, rxByteRate:0,
+    byKind:Object.create(null), lastCheckpointPlayers:0
+};
+
+let membershipRevision = 0;
+let localSequence = 0;
+let confirmedCounter = 0;
+let rejectedCounter = 0;
+let duplicateCounter = 0;
+let invalidCounter = 0;
+let stalledCounter = 0;
+let membershipMismatchCounter = 0;
 let signalingSocket = null;
-let signalingSocketGeneration = 0;
+let signalingGeneration = 0;
 let signalReconnectAttempt = 0;
 let signalReconnectTimer = null;
 let signalConnectTimeout = null;
 let signalKeepaliveTimer = null;
 let signalManualClose = false;
-let signalQueue = [];
-let signalSentCount = 0;
-let signalReceivedCount = 0;
-
-document.getElementById('peerId').textContent = myId;
-document.getElementById('signalMode').textContent = SIGNAL_MODE;
-document.getElementById('signalRoom').textContent = ROOM_ID;
-
-const peers = new Map();
-const prePeerIce = new Map();
-const disconnectTimers = new Map();
-const tearingDownPeers = new Set();
 let pageUnloading = false;
-
-const confirmedWorld = Object.create(null);
-const visibleWorld = Object.create(null);
-const confirmedSeq = new Map();
-const tickAnchors = new Map();
-
-const pendingById = new Map();
-const pendingOrderByPlayer = new Map();
-const pendingByPlayerSequence = new Map();
-const deferredCommands = new Map();
-
-const seenCommandIds = new Set();
-const seenCommandQueue = [];
-const rejectedCommandIds = new Set();
-const orphanReceipts = new Map();
-const validatorReceipts = new Map();
-
-const posHistory = Object.create(null);
-const moveState = Object.create(null);
-const bullets = [];
-const hitFlashes = Object.create(null);
-const hits = Object.create(null);
-const bots = new Set();
-
-let localSequence = 0;
-let membershipRevision = 0;
-let cmdCounter = 0;
-let confirmedCounter = 0;
-let rejectedCounter = 0;
-let duplicateCounter = 0;
-let invalidCounter = 0;
-let lastLocalCommand = null;
 let pendingLogs = [];
 const logHistory = [];
 const LOG_HISTORY_LIMIT = 1000;
 let activeLogFilter = 'all';
 
-initializePlayer(myId, 200 + Math.random() * 300, 150 + Math.random() * 200, myColor);
-refreshMembership('boot');
-
-function currentTick() {
-    return Math.floor((performance.now() - roomEpoch) / TICK_MS);
-}
-
-function colorFor(id) {
-    return COLORS[[...id].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % COLORS.length];
-}
-
-function initializePlayer(playerId, x, y, color = colorFor(playerId), sequence = 0, tick = currentTick()) {
-    const state = {
-        x: round6(x),
-        y: round6(y),
-        color,
-        tick: Number.isSafeInteger(tick) ? tick : 0,
-        sequence: Number.isSafeInteger(sequence) ? sequence : 0,
-        tentative: false
-    };
-    confirmedWorld[playerId] = { ...state };
-    visibleWorld[playerId] = { ...state };
-    confirmedSeq.set(playerId, state.sequence);
-    tickAnchors.set(playerId, { remoteTick: state.tick, localTime: performance.now() });
-    recordHistory(playerId, state.x, state.y, state.sequence, state.tick);
-}
-
-function stableHash(value) {
-    const text = JSON.stringify(value);
-    let hash = 2166136261;
-    for (let i = 0; i < text.length; i++) {
-        hash ^= text.charCodeAt(i);
-        hash = Math.imul(hash, 16777619);
-    }
-    return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
-function stateHash(state) {
-    return stableHash({
-        x: round6(state.x),
-        y: round6(state.y),
-        sequence: state.sequence,
-        tick: state.tick
-    });
-}
-
-function commandHash(command) {
-    return stableHash(command);
-}
-
-function round6(value) {
-    return Math.round(value * 1e6) / 1e6;
-}
-
-function randomId(length = 12) {
-    if (typeof crypto.randomUUID === 'function') {
-        return crypto.randomUUID().replaceAll('-', '').slice(0, length);
-    }
-    const bytes = new Uint8Array(Math.ceil(length / 2));
-    crypto.getRandomValues(bytes);
-    return [...bytes].map(value => value.toString(16).padStart(2, '0')).join('').slice(0, length);
-}
-
-function createCommandId(playerId, sequence) {
-    return `${playerId}:${sequence}:${randomId(12)}`;
-}
-
-
-function currentMembershipIds() {
-    const ids = [myId];
-    for (const [peerId, peer] of peers) {
-        if (peer.dc?.readyState === 'open') ids.push(peerId);
-    }
-    return [...new Set(ids)].sort();
-}
-
-function membershipDescriptor() {
-    const ids = currentMembershipIds();
-    return {
-        membershipIds: ids,
-        membershipHash: stableHash(ids)
-    };
-}
-
-function validatorsFor(command) {
-    const validators = command.membershipIds.filter(id => id !== command.playerId);
-    return validators.length ? validators : [command.playerId];
-}
-
-function quorumFor(command) {
-    const validators = validatorsFor(command);
-    return Math.floor(validators.length / 2) + 1;
-}
-
-function localMembershipMatches(command) {
-    return stableHash(currentMembershipIds()) === command.membershipHash;
-}
-
-function refreshMembership(reason = '') {
-    membershipRevision++;
-    const descriptor = membershipDescriptor();
-    document.getElementById('membershipVersion').textContent = `${membershipRevision} / ${descriptor.membershipHash}`;
-    if (reason) log('t-sys', `membership rev=${membershipRevision} hash=${descriptor.membershipHash} members=${descriptor.membershipIds.join(',')} reason=${reason}`);
-}
-
-function allowedStepForTicks(previousTick, commandTick) {
-    const rawDelta = commandTick - previousTick;
-    const elapsedTicks = Math.max(1, Math.min(MAX_TICK_ADVANCE, rawDelta));
-    const nominalTicksPerStep = STEP_INTERVAL_MS / TICK_MS;
-    const elapsedSteps = elapsedTicks / nominalTicksPerStep;
-    return BASE_MAX_STEP * Math.max(1, elapsedSteps) * STEP_JITTER_ALLOWANCE + STEP_EPSILON;
-}
-
-function computeMove(prevState, dx, dy, commandTick = currentTick()) {
-    const previousTick = Number.isSafeInteger(prevState.tick) ? prevState.tick : commandTick;
-    const tickDelta = commandTick - previousTick;
-    const maxStep = allowedStepForTicks(previousTick, commandTick);
-    const distance = Math.hypot(dx, dy);
-    const scale = distance > maxStep && distance > 0 ? maxStep / distance : 1;
-    const appliedDx = dx * scale;
-    const appliedDy = dy * scale;
-    return {
-        x: round6(prevState.x + appliedDx),
-        y: round6(prevState.y + appliedDy),
-        speedViolation: distance > maxStep + 1e-9,
-        tickViolation: tickDelta < 0,
-        tickDelta,
-        maxStep: round6(maxStep),
-        distance: round6(distance)
-    };
-}
-
-
-function checkCommandTick(playerId, commandTick, previousTick) {
-    if (commandTick < previousTick) {
-        return { ok: false, reason: `tick regression previous=${previousTick} got=${commandTick}` };
-    }
-
-    if (playerId === myId) {
-        const maxTick = currentTick() + 6;
-        return commandTick <= maxTick
-            ? { ok: true, maxTick }
-            : { ok: false, maxTick, reason: `future local tick got=${commandTick} max=${maxTick}` };
-    }
-
-    const anchor = tickAnchors.get(playerId);
-    if (!anchor) {
-        const maxTick = previousTick + MAX_TICK_ADVANCE;
-        return commandTick <= maxTick
-            ? { ok: true, maxTick }
-            : { ok: false, maxTick, reason: `unanchored future tick got=${commandTick} max=${maxTick}` };
-    }
-
-    const elapsedTicks = Math.max(0, Math.floor((performance.now() - anchor.localTime) / TICK_MS));
-    const maxTick = anchor.remoteTick + elapsedTicks + 12;
-    return commandTick <= maxTick
-        ? { ok: true, maxTick }
-        : { ok: false, maxTick, reason: `future remote tick got=${commandTick} max=${maxTick}` };
-}
-
-function makeMoveCommand(dx, dy) {
-    const prev = getPredictedTail(myId);
-    if (!prev) return null;
-    const sequence = ++localSequence;
-    const tick = currentTick();
-    const result = computeMove(prev, dx, dy, tick);
-    const membership = membershipDescriptor();
-    return {
-        protocol: PROTOCOL,
-        type: 'move',
-        commandId: createCommandId(myId, sequence),
-        playerId: myId,
-        sequence,
-        previousStateHash: stateHash(prev),
-        dx: round6(dx),
-        dy: round6(dy),
-        claimedX: result.x,
-        claimedY: result.y,
-        tick,
-        membershipIds: membership.membershipIds,
-        membershipHash: membership.membershipHash
-    };
-}
-
-function makeShootCommand(dirX, dirY) {
-    const shooter = getPredictedTail(myId);
-    if (!shooter) return null;
-
-    const membership = membershipDescriptor();
-    const checkpoint = [];
-    const checkpointWorld = Object.create(null);
-
-    for (const playerId of membership.membershipIds) {
-        const state = playerId === myId ? shooter : confirmedWorld[playerId];
-        if (!state) {
-            log('t-warn', `shoot blocked: confirmed checkpoint missing player=${playerId}`);
-            return null;
-        }
-        const item = {
-            playerId,
-            x: round6(state.x),
-            y: round6(state.y),
-            sequence: state.sequence,
-            tick: state.tick
-        };
-        checkpoint.push(item);
-        checkpointWorld[playerId] = item;
-    }
-
-    checkpoint.sort((a, b) => a.playerId.localeCompare(b.playerId));
-    const sequence = ++localSequence;
-    const originX = round6(shooter.x);
-    const originY = round6(shooter.y);
-    const tick = currentTick();
-
-    return {
-        protocol: PROTOCOL,
-        type: 'shoot',
-        commandId: createCommandId(myId, sequence),
-        playerId: myId,
-        sequence,
-        previousStateHash: stateHash(shooter),
-        originX,
-        originY,
-        dirX: round6(dirX),
-        dirY: round6(dirY),
-        tick,
-        membershipIds: membership.membershipIds,
-        membershipHash: membership.membershipHash,
-        checkpoint,
-        checkpointHash: stableHash(checkpoint),
-        claimedHitId: rayHit(originX, originY, dirX, dirY, checkpointWorld, myId)
-    };
-}
-
-function getPredictedTail(playerId) {
-    const pendingIds = pendingOrderByPlayer.get(playerId) || [];
-    for (let i = pendingIds.length - 1; i >= 0; i--) {
-        const pending = pendingById.get(pendingIds[i]);
-        if (pending?.nextState) return pending.nextState;
-    }
-    return confirmedWorld[playerId] || null;
-}
-
-function sanitizeRoomId(value) {
-    const normalized = String(value || 'default').trim().slice(0, 64);
-    return (normalized || 'default').replace(/[^a-zA-Z0-9_.:-]/g, '_');
-}
-
-function normalizeSignalUrl(value) {
-    if (!value) return null;
-    try {
-        const url = new URL(value, location.href);
-        if (!['ws:', 'wss:'].includes(url.protocol)) return null;
-        if (location.protocol === 'https:' && url.protocol !== 'wss:') return null;
-        url.hash = '';
-        return url.toString();
-    } catch (_) {
-        return null;
-    }
-}
-
-function updateSignalStatus(state, label = state) {
-    const element = document.getElementById('signalState');
-    if (!element) return;
-    element.dataset.state = state;
-    element.textContent = label;
-}
-
-function signalLog(className, message, detail = null) {
-    const line = `[SIGNAL] ${message}`;
-    log(className, line);
-    const consoleMethod = className === 't-err' ? 'error' : className === 't-sig' ? 'info' : 'debug';
-    if (detail == null) console[consoleMethod](line);
-    else console[consoleMethod](line, detail);
-}
-
-function signalEnvelope(message) {
-    return {
-        ...message,
-        from: myId,
-        signalProtocol: SIGNAL_PROTOCOL,
-        signalTick: currentTick()
-    };
-}
-
-function isSignalReady() {
-    if (SIGNAL_MODE === 'websocket') return signalingSocket?.readyState === WebSocket.OPEN;
-    return Boolean(localSignalChannel);
-}
-
-function queueSignal(envelope) {
-    const now = Date.now();
-    signalQueue = signalQueue.filter(item => now - item.queuedAt <= SIGNAL_QUEUE_TTL_MS);
-
-    // 주기적 announce가 소켓 대기열을 도배하지 않게 마지막 하나만 보존한다.
-    if (envelope.type === 'announce') {
-        signalQueue = signalQueue.filter(item => item.envelope.type !== 'announce');
-    }
-
-    signalQueue.push({ envelope, queuedAt: now });
-    if (signalQueue.length > SIGNAL_QUEUE_MAX) signalQueue.splice(0, signalQueue.length - SIGNAL_QUEUE_MAX);
-}
-
-function sendSignal(message) {
-    const envelope = signalEnvelope(message);
-
-    if (SIGNAL_MODE === 'websocket') {
-        if (signalingSocket?.readyState === WebSocket.OPEN) {
-            try {
-                signalingSocket.send(JSON.stringify(envelope));
-                signalSentCount++;
-                return true;
-            } catch (error) {
-                signalLog('t-err', `send failed type=${message.type}: ${error.message}`);
-            }
-        }
-        queueSignal(envelope);
-        return false;
-    }
-
-    if (localSignalChannel) {
-        localSignalChannel.postMessage(envelope);
-        signalSentCount++;
-        return true;
-    }
-
-    signalLog('t-err', `local signaling unavailable type=${message.type}`);
-    return false;
-}
-
-function flushSignalQueue() {
-    if (SIGNAL_MODE !== 'websocket' || signalingSocket?.readyState !== WebSocket.OPEN) return;
-    const now = Date.now();
-    const queued = signalQueue;
-    signalQueue = [];
-    let sent = 0;
-    let dropped = 0;
-
-    for (const item of queued) {
-        if (now - item.queuedAt > SIGNAL_QUEUE_TTL_MS) {
-            dropped++;
-            continue;
-        }
-        try {
-            signalingSocket.send(JSON.stringify(item.envelope));
-            signalSentCount++;
-            sent++;
-        } catch (error) {
-            queueSignal(item.envelope);
-            signalLog('t-err', `queued send failed: ${error.message}`);
-            break;
-        }
-    }
-
-    if (sent || dropped) signalLog('t-sys', `queue flushed sent=${sent} dropped=${dropped}`);
-}
-
-function sendJoin() {
-    if (signalingSocket?.readyState !== WebSocket.OPEN) return false;
-    const join = {
-        type: 'join',
-        channelId: ROOM_ID,
-        peerId: myId,
-        signalProtocol: SIGNAL_PROTOCOL
-    };
-    signalingSocket.send(JSON.stringify(join));
-    signalSentCount++;
-    signalLog('t-sig', `join sent room=${ROOM_ID} peer=${myId}`);
-    return true;
-}
-
-function clearSignalTimers() {
-    clearTimeout(signalReconnectTimer);
-    clearTimeout(signalConnectTimeout);
-    clearInterval(signalKeepaliveTimer);
-    signalReconnectTimer = null;
-    signalConnectTimeout = null;
-    signalKeepaliveTimer = null;
-}
-
-function scheduleSignalReconnect(reason) {
-    if (signalManualClose || SIGNAL_MODE !== 'websocket') return;
-    clearTimeout(signalReconnectTimer);
-    const exponential = Math.min(
-        SIGNAL_RECONNECT_MAX_MS,
-        SIGNAL_RECONNECT_BASE_MS * (2 ** Math.min(signalReconnectAttempt, 6))
-    );
-    const delay = Math.round(exponential * (0.85 + Math.random() * 0.3));
-    signalReconnectAttempt++;
-    updateSignalStatus('reconnecting', `retry ${Math.ceil(delay / 1000)}s`);
-    signalLog('t-sig', `reconnect scheduled in ${delay}ms reason=${reason}`);
-    signalReconnectTimer = setTimeout(connectWebSocketSignaling, delay);
-}
-
-function connectWebSocketSignaling() {
-    if (SIGNAL_MODE !== 'websocket' || signalManualClose) return;
-    if (!SIGNAL_URL) {
-        updateSignalStatus('error', 'invalid URL');
-        signalLog('t-err', `invalid signal URL raw=${RAW_SIGNAL_URL || '(empty)'}`);
-        return;
-    }
-    if (signalingSocket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(signalingSocket.readyState)) return;
-
-    clearTimeout(signalReconnectTimer);
-    clearTimeout(signalConnectTimeout);
-    const generation = ++signalingSocketGeneration;
-    updateSignalStatus('connecting', 'connecting');
-    signalLog('t-sig', `connecting url=${SIGNAL_URL} room=${ROOM_ID} attempt=${signalReconnectAttempt + 1}`);
-
-    let socket;
-    try {
-        socket = new WebSocket(SIGNAL_URL);
-    } catch (error) {
-        signalLog('t-err', `constructor failed: ${error.message}`);
-        scheduleSignalReconnect('constructor failure');
-        return;
-    }
-    signalingSocket = socket;
-
-    signalConnectTimeout = setTimeout(() => {
-        if (generation !== signalingSocketGeneration || socket.readyState !== WebSocket.CONNECTING) return;
-        signalLog('t-err', `connect timeout after ${SIGNAL_CONNECT_TIMEOUT_MS}ms`);
-        try { socket.close(4000, 'connect timeout'); } catch (_) {}
-    }, SIGNAL_CONNECT_TIMEOUT_MS);
-
-    socket.onopen = () => {
-        if (generation !== signalingSocketGeneration) return;
-        clearTimeout(signalConnectTimeout);
-        signalReconnectAttempt = 0;
-        updateSignalStatus('open', 'open');
-        signalLog('t-sig', `open url=${SIGNAL_URL}`);
-
-        // 서버 규칙상 join이 반드시 첫 메시지여야 한다. WebSocket은 전송 순서를 보장한다.
-        sendJoin();
-        flushSignalQueue();
-        sendSignal({ type: 'announce' });
-
-        clearInterval(signalKeepaliveTimer);
-        signalKeepaliveTimer = setInterval(() => {
-            if (socket.readyState !== WebSocket.OPEN) return;
-            try {
-                socket.send(JSON.stringify(signalEnvelope({ type: 'keepalive', to: myId })));
-                signalSentCount++;
-            } catch (error) {
-                signalLog('t-err', `keepalive failed: ${error.message}`);
-            }
-        }, SIGNAL_KEEPALIVE_MS);
-    };
-
-    socket.onmessage = event => {
-        if (generation !== signalingSocketGeneration) return;
-        if (typeof event.data !== 'string') {
-            signalLog('t-err', 'non-text signaling message dropped');
-            return;
-        }
-        if (event.data.length > 256 * 1024) {
-            signalLog('t-err', `oversized signaling message dropped bytes=${event.data.length}`);
-            return;
-        }
-        let message;
-        try {
-            message = JSON.parse(event.data);
-        } catch (error) {
-            signalLog('t-err', `invalid signaling JSON: ${error.message}`);
-            return;
-        }
-        signalReceivedCount++;
-        handleSignalMessage(message, 'websocket');
-    };
-
-    socket.onerror = event => {
-        if (generation !== signalingSocketGeneration) return;
-        updateSignalStatus('error', 'error');
-        signalLog('t-err', 'WebSocket error; close event should contain the final code', event);
-    };
-
-    socket.onclose = event => {
-        if (generation !== signalingSocketGeneration) return;
-        clearTimeout(signalConnectTimeout);
-        clearInterval(signalKeepaliveTimer);
-        signalingSocket = null;
-        const reason = event.reason || 'no reason';
-        updateSignalStatus('closed', `closed ${event.code}`);
-        signalLog(
-            event.code === 1000 && signalManualClose ? 't-sys' : 't-err',
-            `closed code=${event.code} clean=${event.wasClean} reason=${reason}`
-        );
-        scheduleSignalReconnect(`close ${event.code}`);
-    };
-}
-
-function startSignalingTransport() {
-    signalManualClose = false;
-
-    if (SIGNAL_MODE === 'websocket') {
-        connectWebSocketSignaling();
-        return;
-    }
-
-    if (typeof BroadcastChannel !== 'function') {
-        updateSignalStatus('error', 'unsupported');
-        signalLog('t-err', 'BroadcastChannel is not supported in this browser');
-        return;
-    }
-
-    localSignalChannel = new BroadcastChannel(LOCAL_SIGNAL_CHANNEL_NAME);
-    localSignalChannel.onmessage = event => {
-        signalReceivedCount++;
-        handleSignalMessage(event.data, 'broadcast-channel');
-    };
-    updateSignalStatus('open', 'local open');
-    signalLog('t-sig', `local channel open name=${LOCAL_SIGNAL_CHANNEL_NAME}`);
-    sendSignal({ type: 'announce' });
-}
-
-async function handleSignalMessage(message, source) {
-    if (!message || typeof message !== 'object') {
-        signalLog('t-err', `invalid signaling envelope source=${source}`);
-        return;
-    }
-    if (message.from === myId) return;
-    if (typeof message.from !== 'string' || !message.from || message.from.length > 96) {
-        signalLog('t-err', `invalid signaling sender source=${source}`);
-        return;
-    }
-    if (message.to && message.to !== myId) return;
-
-    try {
-        if (message.type === 'announce') {
-            signalLog('t-sig', `announce received from=${message.from} via=${source}`);
-            if (myId < message.from && !peers.has(message.from)) {
-                await createPeer(message.from, true);
-            } else if (!peers.has(message.from)) {
-                peers.set(message.from, {
-                    pc: null,
-                    dc: null,
-                    state: 'awaiting-offer',
-                    remoteId: message.from,
-                    pendingIce: []
-                });
-                updatePeerList();
-            }
-        } else if (message.type === 'offer' && message.to === myId) {
-            signalLog('t-sig', `offer received from=${message.from}`);
-            await createPeer(message.from, false, message.sdp);
-        } else if (message.type === 'answer' && message.to === myId) {
-            signalLog('t-sig', `answer received from=${message.from}`);
-            const peer = peers.get(message.from);
-            if (peer?.pc) {
-                await peer.pc.setRemoteDescription(message.sdp);
-                await flushIceQueue(peer);
-            } else {
-                signalLog('t-err', `answer without peer context from=${message.from}`);
-            }
-        } else if (message.type === 'ice' && message.to === myId) {
-            console.debug(`[SIGNAL] ICE received from=${message.from}`);
-            const peer = peers.get(message.from);
-            if (peer?.pc && peer.pc.remoteDescription) {
-                await peer.pc.addIceCandidate(message.candidate);
-            } else if (peer) {
-                peer.pendingIce ||= [];
-                peer.pendingIce.push(message.candidate);
-            } else {
-                const queued = prePeerIce.get(message.from) || [];
-                queued.push(message.candidate);
-                prePeerIce.set(message.from, queued);
-            }
-        } else if (message.type === 'leave' && message.to === myId) {
-            signalLog('t-sys', `leave received from=${message.from} via=${source}`);
-            removePeer(message.from, 'signaling leave');
-        } else if (message.type !== 'keepalive') {
-            signalLog('t-err', `unknown signaling type=${String(message.type)} source=${source}`);
-        }
-    } catch (error) {
-        signalLog('t-err', `handling failed type=${message.type} from=${message.from}: ${error.message}`);
-    }
-}
-
-function reconnectSignaling() {
-    signalLog('t-sig', 'manual reconnect requested');
-    clearSignalTimers();
-    signalManualClose = false;
-
-    if (SIGNAL_MODE === 'broadcast-channel') {
-        try { localSignalChannel?.close(); } catch (_) {}
-        localSignalChannel = null;
-        startSignalingTransport();
-        return;
-    }
-
-    const oldSocket = signalingSocket;
-    signalingSocket = null;
-    signalingSocketGeneration++;
-    try { oldSocket?.close(1000, 'manual reconnect'); } catch (_) {}
-    signalReconnectAttempt = 0;
-    connectWebSocketSignaling();
-}
-
-window.reconnectSignaling = reconnectSignaling;
-window.getSignalingState = () => ({
-    mode: SIGNAL_MODE,
-    url: SIGNAL_URL,
-    rawUrl: RAW_SIGNAL_URL,
-    room: ROOM_ID,
-    peerId: myId,
-    readyState: SIGNAL_MODE === 'websocket' ? signalingSocket?.readyState ?? WebSocket.CLOSED : (localSignalChannel ? 'open' : 'closed'),
-    queued: signalQueue.length,
-    sent: signalSentCount,
-    received: signalReceivedCount,
-    peers: [...peers.keys()]
-});
-
-function broadcast(message) {
-    const payload = JSON.stringify(message);
-    for (const [peerId, peer] of [...peers]) {
-        if (peer.dc?.readyState !== 'open') continue;
-        try {
-            peer.dc.send(payload);
-        } catch (error) {
-            // readyState 확인과 실제 send 사이에도 채널이 닫힐 수 있다.
-            // 종료 경쟁은 네트워크 오류가 아니라 정상적인 수명주기이므로 peer 정리로 수렴시킨다.
-            log('t-sys', `broadcast skipped closing peer=${peerId}: ${error.message}`);
-            removePeer(peerId, 'send on closing data channel');
-        }
-    }
-}
-
-async function flushIceQueue(entry) {
-    if (!entry?.pc?.remoteDescription) return;
-    const queued = entry.pendingIce || [];
-    entry.pendingIce = [];
-    for (const candidate of queued) {
-        try {
-            await entry.pc.addIceCandidate(candidate);
-        } catch (error) {
-            log('t-err', `ICE candidate rejected peer=${entry.remoteId}: ${error.message}`);
-        }
-    }
-}
-
-async function createPeer(remoteId, isOfferer, remoteSdp) {
-    const existing = peers.get(remoteId);
-    if (existing?.pc && !['closed', 'failed'].includes(existing.pc.connectionState)) return;
-
-    const pc = new RTCPeerConnection(STUN);
-    const entry = {
-        pc,
-        dc: null,
-        state: 'connecting',
-        remoteId,
-        pendingIce: [...(existing?.pendingIce || []), ...(prePeerIce.get(remoteId) || [])]
-    };
-    prePeerIce.delete(remoteId);
-    peers.set(remoteId, entry);
-
-    pc.onicecandidate = event => {
-        if (event.candidate) sendSignal({ type: 'ice', to: remoteId, candidate: event.candidate });
-    };
-
-    pc.onconnectionstatechange = () => {
-        // 이미 다른 종료 경로가 이 peer를 정리 중이면 늦게 도착한 상태 이벤트는 무시한다.
-        if (pageUnloading || tearingDownPeers.has(remoteId) || peers.get(remoteId) !== entry) return;
-
-        entry.state = pc.connectionState;
-        const previousTimer = disconnectTimers.get(remoteId);
-        if (previousTimer) clearTimeout(previousTimer);
-        disconnectTimers.delete(remoteId);
-
-        if (pc.connectionState === 'connected') {
-            // RTCPeerConnection만 연결됐을 때는 DataChannel이 아직 열리지 않았을 수 있다.
-            // 실제 명령 교환 가능한 membership은 dc.onopen에서만 갱신한다.
-            log('t-sig', `WebRTC transport connected ↔ ${remoteId} (waiting data channel)`);
-        } else if (pc.connectionState === 'disconnected') {
-            const timer = setTimeout(() => {
-                const current = peers.get(remoteId);
-                if (current === entry && current.pc?.connectionState === 'disconnected') {
-                    removePeer(remoteId, 'disconnect timeout');
-                }
-            }, DISCONNECT_GRACE_MS);
-            disconnectTimers.set(remoteId, timer);
-        } else if (['failed', 'closed'].includes(pc.connectionState)) {
-            removePeer(remoteId, `peer connection ${pc.connectionState}`);
-        }
-        updatePeerList();
-    };
-
-    function bindChannel(dc) {
-        entry.dc = dc;
-        dc.onopen = () => {
-            if (pageUnloading || tearingDownPeers.has(remoteId) || peers.get(remoteId) !== entry) return;
-            log('t-sig', `DataChannel open ↔ ${remoteId}`);
-            refreshMembership('data channel open');
-            sendSnapshot(remoteId);
-            updatePeerList();
-        };
-        dc.onmessage = event => {
-            if (pageUnloading || tearingDownPeers.has(remoteId) || peers.get(remoteId) !== entry) return;
-            handleWireMessage(remoteId, event.data);
-        };
-        dc.onclose = () => {
-            if (pageUnloading || tearingDownPeers.has(remoteId) || peers.get(remoteId) !== entry) return;
-            log('t-sys', `DataChannel close ↔ ${remoteId}`);
-            removePeer(remoteId, 'data channel closed');
-        };
-        dc.onerror = event => {
-            if (pageUnloading || tearingDownPeers.has(remoteId) || peers.get(remoteId) !== entry) return;
-            log('t-err', `DataChannel error ↔ ${remoteId}: ${event?.message || 'unknown'}`);
-        };
-    }
-
-    if (isOfferer) {
-        bindChannel(pc.createDataChannel('world-v6', { ordered: true }));
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        sendSignal({ type: 'offer', to: remoteId, sdp: offer });
-    } else {
-        pc.ondatachannel = event => bindChannel(event.channel);
-        await pc.setRemoteDescription(remoteSdp);
-        await flushIceQueue(entry);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        sendSignal({ type: 'answer', to: remoteId, sdp: answer });
-    }
-
-    updatePeerList();
-}
-
-function purgePeerProtocolState(remoteId) {
-    prePeerIce.delete(remoteId);
-    tickAnchors.delete(remoteId);
-
-    // 떠난 플레이어가 만든 명령은 더 이상 월드에 적용할 대상이 없으므로 폐기한다.
-    const ownedPending = [...pendingById.values()]
-        .filter(pending => pending.command.playerId === remoteId);
-    for (const pending of ownedPending) {
-        clearTimeout(pending.timeoutId);
-        removePending(pending.command);
-        rejectedCommandIds.add(pending.command.commandId);
-    }
-    pendingOrderByPlayer.delete(remoteId);
-    pendingByPlayerSequence.delete(remoteId);
-
-    for (const [commandId, item] of [...deferredCommands]) {
-        if (item.command.playerId === remoteId || item.remote === remoteId) {
-            deferredCommands.delete(commandId);
-        }
-    }
-
-    // 떠난 검증자의 영수증과, 그 검증자를 기다리던 아직 미결인 명령을 정리한다.
-    for (const [commandId, bucket] of [...orphanReceipts]) {
-        bucket.delete(remoteId);
-        if (bucket.size === 0) orphanReceipts.delete(commandId);
-    }
-    for (const key of [...validatorReceipts.keys()]) {
-        if (key.endsWith(`:${remoteId}`)) validatorReceipts.delete(key);
-    }
-
-    const invalidatedPlayers = new Set();
-    const invalidated = [...pendingById.values()].filter(pending =>
-        !pending.verdict && validatorsFor(pending.command).includes(remoteId)
-    );
-    for (const pending of invalidated) {
-        pending.verdict = 'rejected';
-        pending.rejectReason = `membership changed: validator ${remoteId} departed`;
-        clearTimeout(pending.timeoutId);
-        invalidatedPlayers.add(pending.command.playerId);
-    }
-    for (const playerId of invalidatedPlayers) drainPlayerCommits(playerId);
-}
-
-function removePeer(remoteId, reason = 'unknown') {
-    if (!remoteId || remoteId === myId || tearingDownPeers.has(remoteId)) return false;
-
-    const peer = peers.get(remoteId);
-    if (!peer) {
-        const timer = disconnectTimers.get(remoteId);
-        if (timer) clearTimeout(timer);
-        disconnectTimers.delete(remoteId);
-        prePeerIce.delete(remoteId);
-        return false;
-    }
-
-    tearingDownPeers.add(remoteId);
-    const wasMember = peer.dc?.readyState === 'open';
-
-    try {
-        // 먼저 map에서 제거해야 close 이벤트가 재진입해도 같은 peer를 다시 정리하지 않는다.
-        peers.delete(remoteId);
-
-        const timer = disconnectTimers.get(remoteId);
-        if (timer) clearTimeout(timer);
-        disconnectTimers.delete(remoteId);
-
-        // close()가 발생시키는 늦은 이벤트가 이미 제거된 상태를 건드리지 못하도록 핸들러부터 해제한다.
-        if (peer.dc) {
-            peer.dc.onopen = null;
-            peer.dc.onmessage = null;
-            peer.dc.onclose = null;
-            peer.dc.onerror = null;
-        }
-        if (peer.pc) {
-            peer.pc.onicecandidate = null;
-            peer.pc.onconnectionstatechange = null;
-            peer.pc.ondatachannel = null;
-        }
-
-        try {
-            if (peer.dc && peer.dc.readyState !== 'closed') peer.dc.close();
-        } catch (error) {
-            log('t-sys', `DataChannel close ignored peer=${remoteId}: ${error.message}`);
-        }
-        try {
-            if (peer.pc && peer.pc.connectionState !== 'closed') peer.pc.close();
-        } catch (error) {
-            log('t-sys', `PeerConnection close ignored peer=${remoteId}: ${error.message}`);
-        }
-
-        purgePeerProtocolState(remoteId);
-        delete visibleWorld[remoteId];
-        delete confirmedWorld[remoteId];
-        delete posHistory[remoteId];
-        delete moveState[remoteId];
-        delete hitFlashes[remoteId];
-        delete hits[remoteId];
-        confirmedSeq.delete(remoteId);
-
-        if (!pageUnloading) {
-            if (wasMember) refreshMembership('peer removed');
-            updatePeerList();
-            log('t-sys', `peer removed ↔ ${remoteId} (${reason})`);
-        }
-        return true;
-    } finally {
-        tearingDownPeers.delete(remoteId);
-    }
-}
-
-function handleWireMessage(remoteId, raw) {
-    let message;
-    try {
-        if (typeof raw !== 'string' || raw.length > 64 * 1024) throw new Error('message too large or non-text');
-        message = JSON.parse(raw);
-    } catch (error) {
-        invalidCounter++;
-        log('t-err', `invalid JSON from=${remoteId}: ${error.message}`);
-        return;
-    }
-
-    if (message.kind === 'command') receiveCommand(remoteId, message.command);
-    else if (message.kind === 'receipt') receiveReceipt(remoteId, message.receipt);
-    else if (message.kind === 'snapshot') receiveSnapshot(remoteId, message.snapshot);
-    else if (message.kind === 'moveIntent') receiveMoveIntent(remoteId, message.intent);
-    else if (message.kind === 'leave') removePeer(remoteId, 'data channel leave');
-    else {
-        invalidCounter++;
-        log('t-err', `unknown wire message from=${remoteId}`);
-    }
-}
-
-function validateMembershipDescriptor(command) {
-    if (!Array.isArray(command.membershipIds) || command.membershipIds.length < 1 || command.membershipIds.length > 128) {
-        return 'invalid membershipIds';
-    }
-    if (!command.membershipIds.every(id => typeof id === 'string' && id.length >= 1 && id.length <= 64)) {
-        return 'invalid membership member';
-    }
-    const normalized = [...new Set(command.membershipIds)].sort();
-    if (normalized.length !== command.membershipIds.length) return 'duplicate membership member';
-    if (normalized.some((id, index) => id !== command.membershipIds[index])) return 'membershipIds must be sorted';
-    if (!normalized.includes(command.playerId)) return 'membership excludes command owner';
-    if (stableHash(normalized) !== command.membershipHash) return 'membership hash mismatch';
-    return null;
-}
-
-function validateCommandEnvelope(remoteId, command) {
-    if (!command || command.protocol !== PROTOCOL) return 'unsupported protocol';
-    if (!['move', 'shoot'].includes(command.type)) return 'unsupported command';
-    if (command.playerId !== remoteId) return `identity mismatch channel=${remoteId} payload=${command.playerId}`;
-    if (typeof command.commandId !== 'string' || command.commandId.length < 3 || command.commandId.length > 96) return 'invalid commandId';
-    if (!Number.isSafeInteger(command.sequence) || command.sequence < 1) return 'invalid sequence';
-    if (!Number.isSafeInteger(command.tick) || command.tick < 0) return 'invalid tick';
-    if (typeof command.previousStateHash !== 'string' || command.previousStateHash.length !== 8) return 'invalid previousStateHash';
-    if (typeof command.membershipHash !== 'string' || command.membershipHash.length !== 8) return 'invalid membershipHash';
-
-    const membershipError = validateMembershipDescriptor(command);
-    if (membershipError) return membershipError;
-
-    if (command.type === 'move') {
-        if (![command.dx, command.dy, command.claimedX, command.claimedY].every(Number.isFinite)) return 'invalid move numbers';
-    } else {
-        if (![command.originX, command.originY, command.dirX, command.dirY].every(Number.isFinite)) return 'invalid shoot numbers';
-        if (command.claimedHitId !== null && typeof command.claimedHitId !== 'string') return 'invalid claimedHitId';
-        if (!Array.isArray(command.checkpoint) || command.checkpoint.length !== command.membershipIds.length) return 'invalid checkpoint';
-        if (typeof command.checkpointHash !== 'string' || stableHash(command.checkpoint) !== command.checkpointHash) return 'checkpoint hash mismatch';
-    }
-    return null;
-}
-
-function receiveCommand(remoteId, command) {
-    const validationError = validateCommandEnvelope(remoteId, command);
-    if (validationError) {
-        invalidCounter++;
-        log('t-warn', `command rejected before audit: ${validationError}`);
-        return;
-    }
-    acceptTentativeCommand(command, true);
-}
-
-function executeLocal(command) {
-    if (!command) return;
-    lastLocalCommand = structuredClone(command);
-    acceptTentativeCommand(command, false);
-    broadcast({ kind: 'command', command });
-}
-
-function rememberSeenCommand(commandId) {
-    seenCommandIds.add(commandId);
-    seenCommandQueue.push(commandId);
-    while (seenCommandQueue.length > MAX_SEEN_COMMANDS) {
-        const oldest = seenCommandQueue.shift();
-        if (oldest) seenCommandIds.delete(oldest);
-    }
-}
-
-function pendingSequenceMap(playerId) {
-    let map = pendingByPlayerSequence.get(playerId);
-    if (!map) {
-        map = new Map();
-        pendingByPlayerSequence.set(playerId, map);
-    }
-    return map;
-}
-
-function acceptTentativeCommand(command, remote) {
-    if (seenCommandIds.has(command.commandId) || pendingById.has(command.commandId)) {
-        duplicateCounter++;
-        log('t-sys', `duplicate dropped id=${command.commandId}`);
-        return;
-    }
-
-    const confirmed = confirmedSeq.get(command.playerId) || 0;
-    const expectedSequence = confirmed + getPendingCount(command.playerId) + 1;
-
-    if (command.sequence > expectedSequence) {
-        deferredCommands.set(command.commandId, { command, remote, receivedAt: performance.now() });
-        log('t-sys', `command deferred id=${command.commandId} expected=${expectedSequence} got=${command.sequence}`);
-        return;
-    }
-    if (command.sequence < expectedSequence) {
-        invalidCounter++;
-        log('t-warn', `sequence stale expected=${expectedSequence} got=${command.sequence}`);
-        return;
-    }
-
-    const previousState = getPredictedTail(command.playerId);
-    if (!previousState) {
-        deferredCommands.set(command.commandId, { command, remote, receivedAt: performance.now() });
-        log('t-sys', `command deferred: missing bootstrap state player=${command.playerId}`);
-        return;
-    }
-
-    if (command.tick < previousState.tick) {
-        invalidCounter++;
-        log('t-warn', `tick regression previous=${previousState.tick} got=${command.tick}`);
-        return;
-    }
-    if (stateHash(previousState) !== command.previousStateHash) {
-        invalidCounter++;
-        log('t-warn', `previous state hash mismatch id=${command.commandId}`);
-        return;
-    }
-
-    rememberSeenCommand(command.commandId);
-    cmdCounter++;
-
-    const pending = {
-        command,
-        commandHash: commandHash(command),
-        previousState: { ...previousState },
-        nextState: null,
-        receivedAt: performance.now(),
-        remote,
-        timeoutId: null,
-        receipts: new Map(),
-        verdict: null,
-        stalled: false,
-        membershipMatchedAtReceive: localMembershipMatches(command)
-    };
-
-    if (command.type === 'move') {
-        const result = computeMove(previousState, command.dx, command.dy, command.tick);
-        pending.nextState = {
-            ...previousState,
-            x: result.x,
-            y: result.y,
-            tick: command.tick,
-            sequence: command.sequence,
-            color: previousState.color || colorFor(command.playerId),
-            tentative: true
-        };
-        visibleWorld[command.playerId] = { ...pending.nextState };
-        recordHistory(command.playerId, result.x, result.y, command.sequence, command.tick);
-    } else {
-        pending.nextState = {
-            ...previousState,
-            tick: command.tick,
-            sequence: command.sequence,
-            tentative: true
-        };
-        visibleWorld[command.playerId] = { ...pending.nextState };
-        spawnBullet(command);
-    }
-
-    pendingById.set(command.commandId, pending);
-    const order = pendingOrderByPlayer.get(command.playerId) || [];
-    order.push(command.commandId);
-    pendingOrderByPlayer.set(command.playerId, order);
-    pendingSequenceMap(command.playerId).set(command.sequence, command.commandId);
-
-    const validators = validatorsFor(command);
-    const quorum = quorumFor(command);
-    log('t-cmd', `${command.type} tentative id=${command.commandId} seq=${command.sequence} validators=${validators.join(',')} quorum=${quorum}`);
-
-    pending.timeoutId = setTimeout(() => markPendingStalled(command.commandId), AUDIT_STALL_MS);
-
-    applyOrphanReceipts(command.commandId);
-
-    if (validators.includes(myId)) {
-        queueMicrotask(() => runAudit(command));
-    }
-}
-
-function markPendingStalled(commandId) {
-    const pending = pendingById.get(commandId);
-    if (!pending || pending.verdict) return;
-    pending.stalled = true;
-    const accepted = [...pending.receipts.values()].filter(receipt => receipt.accepted).length;
-    const rejected = [...pending.receipts.values()].filter(receipt => !receipt.accepted).length;
-    log('t-warn', `STALLED id=${commandId} receipts=+${accepted}/-${rejected} quorum=${quorumFor(pending.command)} (timeout is not final rejection)`);
-}
-
-function validateShootCheckpoint(command, pending) {
-    const ids = command.checkpoint.map(item => item?.playerId);
-    if (ids.some(id => typeof id !== 'string')) return { ok: false, reason: 'checkpoint playerId invalid' };
-    if (ids.some((id, index) => id !== command.membershipIds[index])) return { ok: false, reason: 'checkpoint membership order mismatch' };
-
-    const world = Object.create(null);
-    for (const item of command.checkpoint) {
-        if (![item.x, item.y].every(Number.isFinite) || !Number.isSafeInteger(item.sequence) || !Number.isSafeInteger(item.tick)) {
-            return { ok: false, reason: `checkpoint state invalid player=${item.playerId}` };
-        }
-
-        const expected = item.playerId === command.playerId ? pending.previousState : confirmedWorld[item.playerId];
-        if (!expected) return { ok: false, reason: `checkpoint state missing player=${item.playerId}` };
-        if (stateHash(expected) !== stateHash(item)) {
-            return { ok: false, reason: `checkpoint differs player=${item.playerId}` };
-        }
-        world[item.playerId] = item;
-    }
-
-    return { ok: true, world };
-}
-
-function runAudit(command) {
-    const pending = pendingById.get(command.commandId);
-    if (!pending || pending.verdict) return;
-
-    const validators = validatorsFor(command);
-    if (!validators.includes(myId)) return;
-
-    document.getElementById('roleTag').textContent = validators.length === 1 && validators[0] === myId
-        ? `Solo Validator (${command.sequence})`
-        : `Quorum Validator (${command.sequence})`;
-    setTimeout(() => document.getElementById('roleTag').textContent = 'Peer', 500);
-
-    let accepted = false;
-    let reason = '';
-    let computed = null;
-
-    const tickCheck = checkCommandTick(command.playerId, command.tick, pending.previousState.tick);
-
-    if (!pending.membershipMatchedAtReceive) {
-        reason = `membership mismatch local=${stableHash(currentMembershipIds())} command=${command.membershipHash}`;
-    } else if (!tickCheck.ok) {
-        reason = `command tick invalid: ${tickCheck.reason}`;
-        computed = { tickWindowMax: tickCheck.maxTick };
-    } else if (command.type === 'move') {
-        computed = computeMove(pending.previousState, command.dx, command.dy, command.tick);
-        computed.tickWindowMax = tickCheck.maxTick;
-        accepted = !computed.speedViolation
-            && computed.x === command.claimedX
-            && computed.y === command.claimedY
-            && stateHash(pending.previousState) === command.previousStateHash;
-        reason = accepted
-            ? `deterministic move verified max=${computed.maxStep}`
-            : `move invalid distance=${computed.distance} max=${computed.maxStep} tickDelta=${computed.tickDelta}`;
-    } else {
-        const length = Math.hypot(command.dirX, command.dirY);
-        const normalized = Math.abs(length - 1) < 0.02;
-        const originMatches = Math.hypot(
-            pending.previousState.x - command.originX,
-            pending.previousState.y - command.originY
-        ) < 1.5;
-        const checkpointResult = validateShootCheckpoint(command, pending);
-
-        if (checkpointResult.ok) {
-            const recomputedHit = rayHit(
-                command.originX,
-                command.originY,
-                command.dirX,
-                command.dirY,
-                checkpointResult.world,
-                command.playerId
-            );
-            accepted = normalized && originMatches && recomputedHit === command.claimedHitId;
-            computed = { recomputedHit, checkpointHash: command.checkpointHash };
-            reason = accepted
-                ? 'shoot verified against fixed checkpoint'
-                : `shoot mismatch hit=${recomputedHit || 'none'} normalized=${normalized} origin=${originMatches}`;
-        } else {
-            reason = checkpointResult.reason;
-        }
-    }
-
-    const receipt = {
-        protocol: PROTOCOL,
-        commandId: command.commandId,
-        commandHash: pending.commandHash,
-        playerId: command.playerId,
-        sequence: command.sequence,
-        validatorId: myId,
-        accepted,
-        reason,
-        computed,
-        membershipHash: command.membershipHash
-    };
-
-    receiveReceipt(myId, receipt);
-    broadcast({ kind: 'receipt', receipt });
-}
-
-function basicReceiptError(remoteId, receipt) {
-    if (!receipt || receipt.protocol !== PROTOCOL) return 'unsupported receipt protocol';
-    if (receipt.validatorId !== remoteId) return `receipt identity mismatch channel=${remoteId} payload=${receipt.validatorId}`;
-    if (typeof receipt.commandId !== 'string' || receipt.commandId.length > 96) return 'invalid receipt commandId';
-    if (typeof receipt.commandHash !== 'string' || receipt.commandHash.length !== 8) return 'invalid receipt commandHash';
-    if (!Number.isSafeInteger(receipt.sequence) || receipt.sequence < 1) return 'invalid receipt sequence';
-    if (typeof receipt.accepted !== 'boolean') return 'invalid receipt verdict';
-    return null;
-}
-
-function receiveReceipt(remoteId, receipt) {
-    const basicError = basicReceiptError(remoteId, receipt);
-    if (basicError) {
-        invalidCounter++;
-        log('t-err', `invalid receipt from=${remoteId}: ${basicError}`);
-        return;
-    }
-
-    const pending = pendingById.get(receipt.commandId);
-    if (!pending) {
-        storeOrphanReceipt(remoteId, receipt);
-        return;
-    }
-    applyReceiptToPending(remoteId, receipt, pending);
-}
-
-function storeOrphanReceipt(remoteId, receipt) {
-    let bucket = orphanReceipts.get(receipt.commandId);
-    if (!bucket) {
-        if (orphanReceipts.size >= MAX_ORPHAN_COMMANDS) {
-            const oldestKey = orphanReceipts.keys().next().value;
-            orphanReceipts.delete(oldestKey);
-        }
-        bucket = new Map();
-        orphanReceipts.set(receipt.commandId, bucket);
-    }
-    bucket.set(remoteId, { remoteId, receipt, receivedAt: performance.now() });
-    log('t-sys', `orphan receipt buffered command=${receipt.commandId} validator=${remoteId}`);
-}
-
-function applyOrphanReceipts(commandId) {
-    const bucket = orphanReceipts.get(commandId);
-    if (!bucket) return;
-    orphanReceipts.delete(commandId);
-    const pending = pendingById.get(commandId);
-    if (!pending) return;
-    for (const { remoteId, receipt } of bucket.values()) {
-        applyReceiptToPending(remoteId, receipt, pending);
-    }
-}
-
-function applyReceiptToPending(remoteId, receipt, pending) {
-    const command = pending.command;
-    const validators = validatorsFor(command);
-
-    if (!validators.includes(remoteId)) {
-        invalidCounter++;
-        log('t-warn', `unauthorized receipt validator=${remoteId} allowed=${validators.join(',')}`);
-        return;
-    }
-    if (receipt.commandHash !== pending.commandHash
-        || receipt.membershipHash !== command.membershipHash
-        || receipt.sequence !== command.sequence
-        || receipt.playerId !== command.playerId) {
-        invalidCounter++;
-        log('t-warn', `receipt binding mismatch validator=${remoteId} command=${command.commandId}`);
-        return;
-    }
-
-    if (pending.receipts.has(remoteId)) {
-        duplicateCounter++;
-        return;
-    }
-
-    pending.receipts.set(remoteId, receipt);
-    validatorReceipts.set(`${receipt.commandId}:${remoteId}`, receipt);
-    evaluatePendingVerdict(pending);
-}
-
-function evaluatePendingVerdict(pending) {
-    if (pending.verdict) return;
-
-    const validators = validatorsFor(pending.command);
-    const quorum = quorumFor(pending.command);
-    let acceptedCount = 0;
-    let rejectedCount = 0;
-
-    for (const receipt of pending.receipts.values()) {
-        if (receipt.accepted) acceptedCount++;
-        else rejectedCount++;
-    }
-
-    if (acceptedCount >= quorum) {
-        pending.verdict = 'accepted';
-        clearTimeout(pending.timeoutId);
-        drainPlayerCommits(pending.command.playerId);
-    } else if (rejectedCount > validators.length - quorum) {
-        pending.verdict = 'rejected';
-        clearTimeout(pending.timeoutId);
-        pending.rejectReason = [...pending.receipts.values()]
-            .filter(receipt => !receipt.accepted)
-            .map(receipt => `${receipt.validatorId}:${receipt.reason}`)
-            .join(' | ');
-        drainPlayerCommits(pending.command.playerId);
-    }
-}
-
-function drainPlayerCommits(playerId) {
-    while (true) {
-        const nextSequence = (confirmedSeq.get(playerId) || 0) + 1;
-        const commandId = pendingByPlayerSequence.get(playerId)?.get(nextSequence);
-        if (!commandId) break;
-
-        const pending = pendingById.get(commandId);
-        if (!pending || !pending.verdict) break;
-
-        if (pending.verdict === 'accepted') {
-            commitAcceptedPending(pending);
-        } else {
-            finalizeRejectedPending(pending, pending.rejectReason || 'quorum rejection');
-            break;
-        }
-    }
-    rebuildVisibleState(playerId);
-    tryDeferredCommands(playerId);
-}
-
-function commitAcceptedPending(pending) {
-    const command = pending.command;
-
-    if (command.type === 'move') {
-        confirmedWorld[command.playerId] = { ...pending.nextState, tentative: false };
-    } else {
-        const previous = pending.previousState;
-        confirmedWorld[command.playerId] = {
-            ...previous,
-            tick: command.tick,
-            sequence: command.sequence,
-            tentative: false
-        };
-        if (command.claimedHitId) registerHit(command.claimedHitId);
-    }
-
-    visibleWorld[command.playerId] = { ...confirmedWorld[command.playerId] };
-    confirmedSeq.set(command.playerId, command.sequence);
-    // 원격 시계 기준점은 snapshot.clockTick으로 유지한다. 명령의 state tick으로
-    // 덮어쓰면 감사/네트워크 지연만큼 기준 시계가 뒤처져 다음 정상 명령을 거절한다.
-    removePending(command);
-    confirmedCounter++;
-
-    const receipts = [...pending.receipts.values()].filter(receipt => receipt.accepted);
-    log('t-audit', `CONFIRMED seq=${command.sequence} id=${command.commandId} quorum=${receipts.length}/${quorumFor(command)} validators=${receipts.map(r => r.validatorId).join(',')}`);
-
-    if (command.playerId === myId) {
-        for (const peerId of peers.keys()) sendSnapshot(peerId);
-    }
-}
-
-function finalizeRejectedPending(pending, reason) {
-    const command = pending.command;
-    if (rejectedCommandIds.has(command.commandId)) return;
-
-    rejectedCommandIds.add(command.commandId);
-    clearTimeout(pending.timeoutId);
-    removePending(command);
-    rejectedCounter++;
-    hitFlashes[command.playerId] = performance.now() + 350;
-    log('t-warn', `REJECTED seq=${command.sequence} id=${command.commandId} reason=${reason}`);
-
-    rejectDependentCommands(command.playerId, command.sequence);
-
-    if (command.playerId === myId) {
-        const pendingTail = pendingOrderByPlayer.get(myId) || [];
-        localSequence = (confirmedSeq.get(myId) || 0) + pendingTail.length;
-        delete moveState[myId];
-    }
-}
-
-function rejectDependentCommands(playerId, rejectedSequence) {
-    const order = [...(pendingOrderByPlayer.get(playerId) || [])];
-    for (const commandId of order) {
-        const dependent = pendingById.get(commandId);
-        if (dependent && dependent.command.sequence > rejectedSequence) {
-            clearTimeout(dependent.timeoutId);
-            pendingById.delete(commandId);
-            pendingByPlayerSequence.get(playerId)?.delete(dependent.command.sequence);
-            rejectedCommandIds.add(commandId);
-            rejectedCounter++;
-            log('t-warn', `dependent rollback seq=${dependent.command.sequence} id=${commandId}`);
-        }
-    }
-    pendingOrderByPlayer.set(playerId, (pendingOrderByPlayer.get(playerId) || []).filter(id => pendingById.has(id)));
-}
-
-function removePending(command) {
-    pendingById.delete(command.commandId);
-    pendingByPlayerSequence.get(command.playerId)?.delete(command.sequence);
-    const order = pendingOrderByPlayer.get(command.playerId) || [];
-    pendingOrderByPlayer.set(command.playerId, order.filter(id => id !== command.commandId));
-}
-
-function rebuildVisibleState(playerId) {
-    const confirmed = confirmedWorld[playerId];
-    if (!confirmed) return;
-
-    let state = { ...confirmed, tentative: false };
-    const order = pendingOrderByPlayer.get(playerId) || [];
-
-    for (const commandId of order) {
-        const pending = pendingById.get(commandId);
-        if (!pending) continue;
-        const previousState = { ...state };
-
-        if (pending.command.type === 'move') {
-            const result = computeMove(previousState, pending.command.dx, pending.command.dy, pending.command.tick);
-            state = {
-                ...previousState,
-                x: result.x,
-                y: result.y,
-                sequence: pending.command.sequence,
-                tick: pending.command.tick,
-                tentative: true
-            };
-        } else {
-            state = {
-                ...previousState,
-                sequence: pending.command.sequence,
-                tick: pending.command.tick,
-                tentative: true
-            };
-        }
-
-        pending.previousState = previousState;
-        pending.nextState = { ...state };
-    }
-
-    visibleWorld[playerId] = state;
-}
-
-function getPendingCount(playerId) {
-    return (pendingOrderByPlayer.get(playerId) || []).length;
-}
-
-function tryDeferredCommands(playerId) {
-    const candidates = [...deferredCommands.values()]
-        .filter(item => item.command.playerId === playerId)
-        .sort((a, b) => a.command.sequence - b.command.sequence);
-
-    for (const item of candidates) {
-        const expected = (confirmedSeq.get(playerId) || 0) + getPendingCount(playerId) + 1;
-        if (item.command.sequence !== expected || !getPredictedTail(playerId)) continue;
-        deferredCommands.delete(item.command.commandId);
-        acceptTentativeCommand(item.command, item.remote);
-    }
-}
-
-function sendSnapshot(remoteId) {
-    const peer = peers.get(remoteId);
-    if (!peer?.dc || peer.dc.readyState !== 'open') return;
-
-    const state = confirmedWorld[myId];
-    const snapshot = {
-        protocol: PROTOCOL,
-        senderId: myId,
-        state: {
-            x: state.x,
-            y: state.y,
-            color: myColor,
-            tick: state.tick,
-            sequence: confirmedSeq.get(myId) || 0
-        },
-        // state.tick은 마지막 확정 명령의 시각이다. 오래 정지한 플레이어의
-        // 현재 원격 시계와 같지 않으므로 clockTick을 별도로 보낸다.
-        clockTick: currentTick(),
-        stateHash: stateHash({ ...state, sequence: confirmedSeq.get(myId) || 0 }),
-        membershipHint: membershipDescriptor()
-    };
-
-    try {
-        peer.dc.send(JSON.stringify({ kind: 'snapshot', snapshot }));
-    } catch (error) {
-        log('t-sys', `snapshot skipped closing peer=${remoteId}: ${error.message}`);
-        removePeer(remoteId, 'snapshot send failed');
-    }
-}
-
-function receiveSnapshot(remoteId, snapshot) {
-    if (!snapshot || snapshot.protocol !== PROTOCOL || snapshot.senderId !== remoteId || !snapshot.state) {
-        invalidCounter++;
-        return;
-    }
-
-    const state = snapshot.state;
-    if (![state.x, state.y].every(Number.isFinite)
-        || !Number.isSafeInteger(state.sequence)
-        || state.sequence < 0
-        || !Number.isSafeInteger(state.tick)
-        || state.tick < 0
-        || !Number.isSafeInteger(snapshot.clockTick)
-        || snapshot.clockTick < 0
-        || state.tick > snapshot.clockTick + 6) {
-        invalidCounter++;
-        log('t-warn', `snapshot clock invalid from=${remoteId} stateTick=${state.tick} clockTick=${snapshot.clockTick}`);
-        return;
-    }
-
-    if (snapshot.stateHash !== stateHash(state)) {
-        invalidCounter++;
-        log('t-warn', `snapshot hash mismatch from=${remoteId}`);
-        return;
-    }
-
-    // 위치 state.tick이 아니라 송신자의 현재 clockTick을 시간 기준점으로 쓴다.
-    // 예: 접속 후 14초 동안 정지했다면 state.tick=0, clockTick≈420일 수 있다.
-    // 이 둘을 혼동하면 첫 정상 이동을 미래 tick 치트로 오판한다.
-    const now = performance.now();
-    const existingAnchor = tickAnchors.get(remoteId);
-    if (!existingAnchor || snapshot.clockTick >= existingAnchor.remoteTick) {
-        tickAnchors.set(remoteId, { remoteTick: snapshot.clockTick, localTime: now });
-    }
-
-    const localSequence = confirmedSeq.get(remoteId);
-    if (localSequence !== undefined) {
-        if (state.sequence < localSequence) return;
-        if (state.sequence === localSequence) {
-            if (stateHash(confirmedWorld[remoteId]) !== snapshot.stateHash) {
-                invalidCounter++;
-                log('t-warn', `snapshot fork detected player=${remoteId} seq=${state.sequence}`);
-            }
-            return;
-        }
-        if (state.sequence - localSequence > MAX_SNAPSHOT_SEQUENCE_JUMP) {
-            invalidCounter++;
-            log('t-warn', `snapshot sequence jump rejected player=${remoteId} local=${localSequence} got=${state.sequence}`);
-            return;
-        }
-        if (getPendingCount(remoteId) > 0) {
-            log('t-sys', `snapshot deferred player=${remoteId}: local pending chain exists`);
-            return;
-        }
-    }
-
-    confirmedWorld[remoteId] = {
-        x: round6(state.x),
-        y: round6(state.y),
-        color: colorFor(remoteId),
-        tick: state.tick,
-        sequence: state.sequence,
-        tentative: false
-    };
-    visibleWorld[remoteId] = { ...confirmedWorld[remoteId] };
-    confirmedSeq.set(remoteId, state.sequence);
-    recordHistory(remoteId, state.x, state.y, state.sequence, state.tick);
-    log('t-sys', `self-owned snapshot merged from=${remoteId} seq=${state.sequence} stateTick=${state.tick} clockTick=${snapshot.clockTick}`);
-    tryDeferredCommands(remoteId);
-}
-
-/* 렌더 전용 이동 힌트. 권위 상태와 판정에는 사용하지 않는다. */
-function broadcastMoveIntent(playerId, movement) {
-    broadcast({
-        kind: 'moveIntent',
-        intent: {
-            playerId,
-            startX: movement.startX,
-            startY: movement.startY,
-            targetX: movement.targetX,
-            targetY: movement.targetY,
-            naturalDuration: movement.naturalDuration
-        }
-    });
-}
-
-function receiveMoveIntent(remoteId, intent) {
-    if (!intent || intent.playerId !== remoteId) {
-        invalidCounter++;
-        return;
-    }
-
-    const numbers = [intent.startX, intent.startY, intent.targetX, intent.targetY, intent.naturalDuration];
-    if (!numbers.every(Number.isFinite)) {
-        invalidCounter++;
-        return;
-    }
-
-    const now = performance.now();
-    const duration = Math.max(1, Math.min(MOVE_MAX_DURATION, intent.naturalDuration));
-    moveState[intent.playerId] = {
-        startX: intent.startX,
-        startY: intent.startY,
-        targetX: intent.targetX,
-        targetY: intent.targetY,
-        startTime: now,
-        naturalDuration: duration,
-        hardStopAt: now + MOVE_MAX_DURATION,
-        lastX: intent.startX,
-        lastY: intent.startY
-    };
-}
-
-function evalMoveSegment(movement, now) {
-    const timedOut = now >= movement.hardStopAt;
-    const progress = (now - movement.startTime) / movement.naturalDuration;
-    const finished = timedOut || progress >= 1;
-    const eased = easeInOutQuad(Math.max(0, Math.min(1, progress)));
-    return {
-        x: movement.startX + (movement.targetX - movement.startX) * eased,
-        y: movement.startY + (movement.targetY - movement.startY) * eased,
-        finished
-    };
-}
-
-function recordHistory(playerId, x, y, sequence, tick) {
-    const history = posHistory[playerId] || (posHistory[playerId] = []);
-    history.push({ t: performance.now(), x, y, sequence, tick });
-    while (history.length > 60) history.shift();
-}
-
-function getRenderPosition(playerId) {
-    const state = visibleWorld[playerId];
-    if (!state) return null;
-    const movement = moveState[playerId];
-    if (movement) {
-        const evaluated = evalMoveSegment(movement, performance.now());
-        return { x: evaluated.x, y: evaluated.y };
-    }
-    return state;
-}
-
-function rayHit(originX, originY, dirX, dirY, worldSnapshot, excludeId) {
-    let closestId = null;
-    let closestDistance = Infinity;
-
-    for (const [playerId, state] of Object.entries(worldSnapshot)) {
-        if (playerId === excludeId || !state || !Number.isFinite(state.x)) continue;
-        const px = state.x - originX;
-        const py = state.y - originY;
-        const projection = px * dirX + py * dirY;
-        if (projection < 0 || projection > MAX_RANGE) continue;
-        const closestX = originX + dirX * projection;
-        const closestY = originY + dirY * projection;
-        const distance = Math.hypot(state.x - closestX, state.y - closestY);
-        if (distance <= HIT_RADIUS && projection < closestDistance) {
-            closestId = playerId;
-            closestDistance = projection;
-        }
-    }
-
-    return closestId;
-}
-
-function spawnBullet(command) {
-    bullets.push({
-        x1: command.originX,
-        y1: command.originY,
-        x2: command.originX + command.dirX * MAX_RANGE,
-        y2: command.originY + command.dirY * MAX_RANGE,
-        born: performance.now(),
-        color: visibleWorld[command.playerId]?.color || '#fff'
-    });
-}
-
-function registerHit(playerId) {
-    hits[playerId] = (hits[playerId] || 0) + 1;
-    hitFlashes[playerId] = performance.now() + 220;
-}
-
-function easeInOutQuad(t) {
-    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-}
-
-function startMove(playerId, fromX, fromY, toX, toY) {
-    const distance = Math.hypot(toX - fromX, toY - fromY);
-    const naturalDuration = Math.min(MOVE_MAX_DURATION, Math.max(MOVE_MIN_DURATION, distance / MOVE_SPEED * 1000));
-    const now = performance.now();
-
-    moveState[playerId] = {
-        startX: fromX,
-        startY: fromY,
-        targetX: toX,
-        targetY: toY,
-        startTime: now,
-        naturalDuration,
-        hardStopAt: now + MOVE_MAX_DURATION,
-        lastX: fromX,
-        lastY: fromY
-    };
-
-    if (playerId === myId) broadcastMoveIntent(playerId, moveState[playerId]);
-}
-
-function tickMovement() {
-    const now = performance.now();
-
-    for (const playerId of Object.keys(moveState)) {
-        const movement = moveState[playerId];
-        if (!movement) continue;
-        const evaluated = evalMoveSegment(movement, now);
-        const dx = evaluated.x - movement.lastX;
-        const dy = evaluated.y - movement.lastY;
-
-        if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) {
-            if (playerId === myId) executeLocal(makeMoveCommand(dx, dy));
-            else if (bots.has(playerId)) moveBot(playerId, dx, dy);
-        }
-
-        movement.lastX = evaluated.x;
-        movement.lastY = evaluated.y;
-
-        if (evaluated.finished) {
-            if (bots.has(playerId)) assignRandomBotTarget(playerId);
-            else delete moveState[playerId];
-        }
-    }
-}
-
-function moveBot(playerId, dx, dy) {
-    const previous = visibleWorld[playerId];
-    if (!previous) return;
-    const tick = currentTick();
-    const result = computeMove(previous, dx, dy, tick);
-    const next = {
-        ...previous,
-        x: result.x,
-        y: result.y,
-        tick,
-        sequence: previous.sequence + 1,
-        tentative: false
-    };
-    confirmedWorld[playerId] = { ...next };
-    visibleWorld[playerId] = { ...next };
-    confirmedSeq.set(playerId, next.sequence);
-    recordHistory(playerId, next.x, next.y, next.sequence, next.tick);
-    cmdCounter++;
-}
-
 const canvas = document.getElementById('canvas');
 const context = canvas.getContext('2d');
+document.getElementById('peerId').textContent = myId;
+document.getElementById('signalRoom').textContent = ROOM_ID;
 
-function resizeCanvas() {
-    canvas.width = canvas.clientWidth * devicePixelRatio;
-    canvas.height = canvas.clientHeight * devicePixelRatio;
-    context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-}
-
-window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
-
-canvas.addEventListener('click', event => {
-    const rect = canvas.getBoundingClientRect();
-    const me = getRenderPosition(myId) || visibleWorld[myId];
-    const dx = event.clientX - rect.left - me.x;
-    const dy = event.clientY - rect.top - me.y;
-    const distance = Math.hypot(dx, dy) || 1;
-    executeLocal(makeShootCommand(dx / distance, dy / distance));
-});
-
-canvas.addEventListener('contextmenu', event => {
-    event.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const me = getRenderPosition(myId) || visibleWorld[myId];
-    startMove(myId, me.x, me.y, event.clientX - rect.left, event.clientY - rect.top);
-});
-
-window.addEventListener('keydown', event => {
-    let dx = 0;
-    let dy = 0;
-    const step = 16;
-    if (event.key === 'ArrowUp') dy = -step;
-    else if (event.key === 'ArrowDown') dy = step;
-    else if (event.key === 'ArrowLeft') dx = -step;
-    else if (event.key === 'ArrowRight') dx = step;
-    else return;
-
-    event.preventDefault();
-    delete moveState[myId];
-    executeLocal(makeMoveCommand(dx, dy));
-});
-
-function spawnStressBots(count) {
-    const safeCount = Math.max(1, Math.min(1500, count));
-    for (let i = 0; i < safeCount; i++) {
-        const id = `bot-${Math.random().toString(36).slice(2, 8)}`;
-        const x = Math.random() * canvas.clientWidth;
-        const y = Math.random() * canvas.clientHeight;
-        bots.add(id);
-        initializePlayer(id, x, y, colorFor(id));
-        assignRandomBotTarget(id);
-    }
-    log('t-sys', `local-only stress bots +${safeCount}, total=${bots.size}`);
-}
-
-function assignRandomBotTarget(playerId) {
-    const state = visibleWorld[playerId];
-    if (!state) return;
-    startMove(playerId, state.x, state.y, Math.random() * canvas.clientWidth, Math.random() * canvas.clientHeight);
-}
-
-function clearStressBots() {
-    for (const id of bots) {
-        delete confirmedWorld[id];
-        delete visibleWorld[id];
-        delete moveState[id];
-        delete posHistory[id];
-        confirmedSeq.delete(id);
-        tickAnchors.delete(id);
-    }
-    bots.clear();
-}
-
-window.spawnStressBots = spawnStressBots;
-window.clearStressBots = clearStressBots;
-
-window.cheatTeleport = () => {
-    const command = makeMoveCommand(500, 500);
-    if (!command) return;
-    command.tick += 1000000;
-    const previous = getPredictedTail(myId);
-    command.claimedX = round6(previous.x + 500);
-    command.claimedY = round6(previous.y + 500);
-    executeLocal(command);
-    log('t-cmd', '[CHEAT] future-tick teleport submitted; quorum should reject it');
-};
-
-window.spoofIdentity = () => {
-    const peerId = [...peers.keys()][0];
-    if (!peerId) return log('t-err', 'spoofIdentity: 연결된 peer가 없음');
-    const command = makeMoveCommand(10, 0);
-    if (!command) return;
-    command.playerId = peerId;
-    broadcast({ kind: 'command', command });
-    log('t-cmd', `[CHEAT] forged playerId=${peerId}; channel identity should reject it`);
-};
-
-window.replayLastCommand = () => {
-    if (!lastLocalCommand) return log('t-err', 'replayLastCommand: command 없음');
-    broadcast({ kind: 'command', command: lastLocalCommand });
-    receiveCommand(myId, lastLocalCommand);
-    log('t-cmd', `[CHEAT] replay id=${lastLocalCommand.commandId}`);
-};
-
-window.forgeSnapshot = () => {
-    const peerId = [...peers.keys()][0];
-    if (!peerId) return log('t-err', 'forgeSnapshot: 연결된 peer가 없음');
-    const peer = peers.get(peerId);
-    const victimId = [...peers.keys()][0];
-    const fake = {
-        protocol: PROTOCOL,
-        senderId: myId,
-        state: { x: 999, y: 999, color: myColor, tick: currentTick(), sequence: confirmedSeq.get(myId) || 0 },
-        membershipHint: membershipDescriptor()
-    };
-    fake.stateHash = stateHash(fake.state);
-    peer.dc.send(JSON.stringify({ kind: 'snapshot', snapshot: fake }));
-    log('t-cmd', `[CHEAT] snapshot can only claim senderId=${myId}; third-party victim=${victimId} field no longer exists`);
-};
-
-function draw() {
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-    context.clearRect(0, 0, width, height);
-
-    const me = getRenderPosition(myId);
-    if (me) {
-        context.beginPath();
-        context.arc(me.x, me.y, 140, 0, Math.PI * 2);
-        context.strokeStyle = 'rgba(61,220,151,.18)';
-        context.setLineDash([4, 4]);
-        context.stroke();
-        context.setLineDash([]);
-    }
-
-    for (let i = bullets.length - 1; i >= 0; i--) {
-        const bullet = bullets[i];
-        const age = performance.now() - bullet.born;
-        if (age > 160) {
-            bullets.splice(i, 1);
-            continue;
-        }
-        context.globalAlpha = 1 - age / 160;
-        context.strokeStyle = bullet.color;
-        context.lineWidth = 2;
-        context.beginPath();
-        context.moveTo(bullet.x1, bullet.y1);
-        context.lineTo(bullet.x2, bullet.y2);
-        context.stroke();
-        context.globalAlpha = 1;
-    }
-
-    const showBotLabels = bots.size <= 30;
-    for (const playerId in visibleWorld) {
-        const state = visibleWorld[playerId];
-        const render = getRenderPosition(playerId);
-        if (!render) continue;
-
-        const isMe = playerId === myId;
-        const isBot = bots.has(playerId);
-        const flashing = performance.now() < (hitFlashes[playerId] || 0);
-        const playerPending = (pendingOrderByPlayer.get(playerId) || [])
-            .map(id => pendingById.get(id))
-            .filter(Boolean);
-        const isStalled = playerPending.some(pending => pending.stalled);
-
-        context.beginPath();
-        context.arc(render.x, render.y, isMe ? 9 : 7, 0, Math.PI * 2);
-        context.fillStyle = flashing ? '#fff' : state.color || '#888';
-        context.fill();
-
-        if (isStalled) {
-            context.lineWidth = 3;
-            context.strokeStyle = '#ef5b6e';
-            context.stroke();
-        } else if (state.tentative) {
-            context.lineWidth = 2;
-            context.strokeStyle = '#f2a93b';
-            context.stroke();
-        } else if (isMe) {
-            context.lineWidth = 2;
-            context.strokeStyle = '#fff';
-            context.stroke();
-        }
-
-        if (!isBot || showBotLabels) {
-            context.fillStyle = '#8fa3b0';
-            context.font = '10px monospace';
-            const hitLabel = hits[playerId] ? ` [hit×${hits[playerId]}]` : '';
-            const tentativeLabel = state.tentative ? ' [pending]' : '';
-            const stalledLabel = isStalled ? ' [stalled]' : '';
-            context.fillText(`${playerId}${isMe ? ' (you)' : ''}${hitLabel}${tentativeLabel}${stalledLabel}`, render.x + 12, render.y + 4);
-        }
-    }
-
-    requestAnimationFrame(draw);
-}
-
+initializePlayer(myId, randomSpawnX(), randomSpawnY(), myColor);
+refreshMembership('boot');
+startSignaling();
 requestAnimationFrame(draw);
 
-function updatePeerList() {
-    document.getElementById('connCount').textContent = [...peers.values()].filter(peer => peer.dc?.readyState === 'open').length;
-    const element = document.getElementById('peerList');
+function currentTick(){ return Math.floor((performance.now() - roomEpoch) / TICK_MS); }
+function round6(value){ return Math.round(value * 1e6) / 1e6; }
+function clampNumber(value,fallback,min,max){ if(value==null||String(value).trim()==='') return fallback; const number=Number(value); return Number.isFinite(number)?Math.max(min,Math.min(max,number)):fallback; }
+function randomId(length=12){
+    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID().replaceAll('-','').slice(0,length);
+    const bytes = new Uint8Array(Math.ceil(length/2));
+    crypto.getRandomValues(bytes);
+    return [...bytes].map(v=>v.toString(16).padStart(2,'0')).join('').slice(0,length);
+}
+function colorFor(id){ return COLORS[[...id].reduce((s,c)=>s+c.charCodeAt(0),0)%COLORS.length]; }
+function stableHash(value){
+    const text = JSON.stringify(value); let hash = 2166136261;
+    for(let i=0;i<text.length;i++){ hash ^= text.charCodeAt(i); hash = Math.imul(hash,16777619); }
+    return (hash>>>0).toString(16).padStart(8,'0');
+}
+function stateHash(state){
+    return stableHash({x:round6(state.x),y:round6(state.y),sequence:state.sequence,tick:state.tick,hp:state.hp,alive:state.alive,lifeId:state.lifeId});
+}
+function sanitizeRoomId(value){ return (String(value||'default').trim().slice(0,64)||'default').replace(/[^a-zA-Z0-9_.:-]/g,'_'); }
+function normalizeSignalUrl(value){
+    if(!value) return null;
+    try{ const url=new URL(value,location.href); if(!['ws:','wss:'].includes(url.protocol)) return null; if(location.protocol==='https:'&&url.protocol!=='wss:') return null; url.hash=''; return url.toString(); }catch(_){ return null; }
+}
+function randomSpawnX(){ return 60 + Math.random()*Math.max(120,canvas.clientWidth-120); }
+function randomSpawnY(){ return 70 + Math.random()*Math.max(140,canvas.clientHeight-140); }
+function createCommandId(playerId,sequence){ return `${playerId}:${sequence}:${randomId(12)}`; }
 
-    if (peers.size === 0) {
-        element.innerHTML = '<span style="color:var(--dim)">다른 탭 대기 중...</span>';
-        return;
-    }
-
-    element.innerHTML = '';
-    for (const [peerId, peer] of peers) {
-        const row = document.createElement('div');
-        row.className = 'peerRow';
-        const connected = peer.dc?.readyState === 'open';
-        const stateColor = connected ? 'var(--accent)' : peer.state === 'connecting' ? 'var(--warn)' : 'var(--err)';
-        const left = document.createElement('span');
-        const dot = document.createElement('span');
-        dot.className = 'dot';
-        dot.style.background = stateColor;
-        left.appendChild(dot);
-        left.appendChild(document.createTextNode(peerId));
-        const right = document.createElement('span');
-        right.style.color = stateColor;
-        right.textContent = connected ? 'connected' : peer.state;
-        row.append(left, right);
-        element.appendChild(row);
-    }
+function initializePlayer(playerId,x,y,color=colorFor(playerId),options={}){
+    const tick = Number.isSafeInteger(options.tick) ? options.tick : currentTick();
+    const state = {
+        x:round6(x), y:round6(y), color,
+        sequence:Number.isSafeInteger(options.sequence)?options.sequence:0,
+        tick,
+        hp:Number.isSafeInteger(options.hp)?Math.max(0,Math.min(MAX_HP,options.hp)):MAX_HP,
+        alive:options.alive!==false,
+        lifeId:Number.isSafeInteger(options.lifeId)?options.lifeId:1,
+        deadObservedAt:options.alive===false?performance.now():0,
+        tentative:false
+    };
+    confirmedWorld[playerId]={...state};
+    visibleWorld[playerId]={...state};
+    confirmedSeq.set(playerId,state.sequence);
+    const now=performance.now();
+    tickAnchors.set(playerId,{remoteTick:tick,localTime:now});
+    activityAnchors.set(playerId,{lastMoveAt:now,lastDamageAt:now,lastHealAt:now});
 }
 
-const logElement = document.getElementById('log');
-const logEmptyElement = document.getElementById('logEmpty');
-
-function classifyLog(className, message) {
-    let level = 'info';
-    let category = 'system';
-    if (className === 't-err') level = 'error';
-    else if (className === 't-warn') level = 'warn';
-    else if (className === 't-cmd') { level = 'debug'; category = 'command'; }
-    else if (className === 't-audit') category = 'command';
-    else if (className === 't-sig' || message.startsWith('[SIGNAL]')) category = 'signal';
-    return { level, category };
+function currentMembershipIds(){
+    const ids=[myId];
+    for(const [id,peer] of peers) if(peer.dc?.readyState==='open') ids.push(id);
+    return [...new Set(ids)].sort();
 }
-
-function log(className, message) {
-    const meta = classifyLog(className, message);
-    pendingLogs.push({
-        className,
-        message,
-        level: meta.level,
-        category: meta.category,
-        time: new Date().toLocaleTimeString('ko-KR', { hour12: false })
-    });
+function membershipDescriptor(){
+    const membershipIds=currentMembershipIds();
+    const membershipHash=stableHash(membershipIds);
+    return {membershipIds,membershipHash,epochId:stableHash({room:ROOM_ID,membershipHash})};
 }
-
-function logMatchesFilter(item, filter = activeLogFilter) {
-    if (filter === 'all') return true;
-    if (filter === 'error' || filter === 'warn') return item.level === filter;
-    return item.category === filter;
+function committeeSeed(command){ return stableHash({epochId:command.epochId,membershipHash:command.membershipHash,playerId:command.playerId,sequence:command.sequence,previousStateHash:command.previousStateHash}); }
+function validatorsFor(command){
+    const candidates=command.membershipIds.filter(id=>id!==command.playerId);
+    if(!candidates.length) return [command.playerId];
+    const seed=committeeSeed(command);
+    return [...candidates].sort((a,b)=>stableHash(`${seed}:${a}`).localeCompare(stableHash(`${seed}:${b}`))).slice(0,Math.min(COMMITTEE_SIZE,candidates.length));
 }
-
-function createLogLine(item) {
-    const line = document.createElement('div');
-    line.className = item.className;
-    line.dataset.level = item.level;
-    line.dataset.category = item.category;
-    line.textContent = `[${item.time}] ${item.message}`;
-    return line;
+function quorumFor(command){ return Math.floor(validatorsFor(command).length/2)+1; }
+function membershipMatches(command){ const current=membershipDescriptor(); return current.membershipHash===command.membershipHash&&current.epochId===command.epochId; }
+function refreshMembership(reason=''){
+    membershipRevision++;
+    const descriptor=membershipDescriptor();
+    document.getElementById('membershipVersion').textContent=`${membershipRevision} / ${descriptor.membershipHash}`;
+    document.getElementById('epochStat').textContent=descriptor.epochId;
+    if(reason) log('t-sys',`membership rev=${membershipRevision} epoch=${descriptor.epochId} members=${descriptor.membershipIds.join(',')} reason=${reason}`);
 }
-
-function updateLogCounts() {
-    const counts = { all: logHistory.length, error: 0, warn: 0, signal: 0, command: 0 };
-    for (const item of logHistory) {
-        if (item.level === 'error') counts.error++;
-        if (item.level === 'warn') counts.warn++;
-        if (item.category === 'signal') counts.signal++;
-        if (item.category === 'command') counts.command++;
-    }
-    document.getElementById('logCountAll').textContent = counts.all;
-    document.getElementById('logCountError').textContent = counts.error;
-    document.getElementById('logCountWarn').textContent = counts.warn;
-    document.getElementById('logCountSignal').textContent = counts.signal;
-    document.getElementById('logCountCommand').textContent = counts.command;
-}
-
-function renderLogHistory() {
-    const fragment = document.createDocumentFragment();
-    let visibleCount = 0;
-    for (const item of logHistory) {
-        if (!logMatchesFilter(item)) continue;
-        fragment.appendChild(createLogLine(item));
-        visibleCount++;
-    }
-    logElement.replaceChildren(fragment);
-    logEmptyElement.style.display = visibleCount ? 'none' : 'block';
-    if (!visibleCount) logElement.appendChild(logEmptyElement);
-    logElement.scrollTop = logElement.scrollHeight;
-}
-
-function setLogFilter(filter) {
-    const allowed = new Set(['all', 'error', 'warn', 'signal', 'command']);
-    activeLogFilter = allowed.has(filter) ? filter : 'all';
-    for (const button of document.querySelectorAll('#logToolbar [data-filter]')) {
-        button.classList.toggle('active', button.dataset.filter === activeLogFilter);
-    }
-    renderLogHistory();
-}
-
-function clearLogs() {
-    pendingLogs = [];
-    logHistory.length = 0;
-    updateLogCounts();
-    renderLogHistory();
-}
-
-window.setLogFilter = setLogFilter;
-window.clearLogs = clearLogs;
-
-function flushLogs() {
-    if (!pendingLogs.length) return;
-    const wasNearBottom = logElement.scrollHeight - logElement.scrollTop - logElement.clientHeight < 24;
-    for (const item of pendingLogs) logHistory.push(item);
-    if (logHistory.length > LOG_HISTORY_LIMIT) {
-        logHistory.splice(0, logHistory.length - LOG_HISTORY_LIMIT);
-        renderLogHistory();
-    } else {
-        const fragment = document.createDocumentFragment();
-        for (const item of pendingLogs) {
-            if (logMatchesFilter(item)) fragment.appendChild(createLogLine(item));
-        }
-        if (fragment.childNodes.length) {
-            logEmptyElement.remove();
-            logElement.appendChild(fragment);
-        }
-    }
-    pendingLogs = [];
-    updateLogCounts();
-    const hasVisible = logHistory.some(item => logMatchesFilter(item));
-    logEmptyElement.style.display = hasVisible ? 'none' : 'block';
-    if (!hasVisible && !logEmptyElement.isConnected) logElement.appendChild(logEmptyElement);
-    if (wasNearBottom) logElement.scrollTop = logElement.scrollHeight;
-}
-
-function pruneEphemeralBuffers() {
-    const now = performance.now();
-    for (const [commandId, bucket] of orphanReceipts) {
-        for (const [validatorId, item] of bucket) {
-            if (now - item.receivedAt > ORPHAN_RECEIPT_TTL_MS) bucket.delete(validatorId);
-        }
-        if (bucket.size === 0) orphanReceipts.delete(commandId);
-    }
-    for (const [commandId, item] of deferredCommands) {
-        if (now - item.receivedAt > ORPHAN_RECEIPT_TTL_MS) {
-            deferredCommands.delete(commandId);
-            invalidCounter++;
-            log('t-warn', `deferred command expired id=${commandId}`);
-        }
+function distanceBetweenStates(a,b){ return a&&b?Math.hypot(a.x-b.x,a.y-b.y):Infinity; }
+function isInLocalAoi(playerId){ if(playerId===myId) return true; return distanceBetweenStates(visibleWorld[myId],visibleWorld[playerId])<=AOI_RADIUS; }
+function localAoiPeerIds(){ return currentMembershipIds().filter(id=>id!==myId&&isInLocalAoi(id)); }
+function sendToAoi(message,originState=visibleWorld[myId]){
+    for(const [id,peer] of [...peers]){
+        if(peer.dc?.readyState!=='open') continue;
+        const remote=visibleWorld[id];
+        if(remote&&distanceBetweenStates(originState,remote)<=AOI_RADIUS) safeDataSend(id,message);
     }
 }
 
-setInterval(tickMovement, STEP_INTERVAL_MS);
-setInterval(flushLogs, 120);
-setInterval(pruneEphemeralBuffers, 1000);
-setInterval(() => document.getElementById('tick').textContent = `TICK ${currentTick()}`, 100);
-setInterval(() => {
-    document.getElementById('botStat').textContent = bots.size;
-    document.getElementById('cmdRateStat').textContent = cmdCounter;
-    document.getElementById('confirmedStat').textContent = confirmedCounter;
-    document.getElementById('tentativeStat').textContent = pendingById.size;
-    document.getElementById('rejectedStat').textContent = rejectedCounter;
-    document.getElementById('duplicateStat').textContent = duplicateCounter;
-    document.getElementById('invalidStat').textContent = invalidCounter;
-    cmdCounter = 0;
-}, 1000);
+function allowedStepForTicks(previousTick,commandTick){
+    const elapsedTicks=Math.max(1,Math.min(MAX_TICK_ADVANCE,commandTick-previousTick));
+    const elapsedSteps=elapsedTicks/(STEP_INTERVAL_MS/TICK_MS);
+    return BASE_MAX_STEP*Math.max(1,elapsedSteps)*STEP_JITTER_ALLOWANCE+STEP_EPSILON;
+}
+function computeMove(prev,dx,dy,tick){
+    const maxStep=allowedStepForTicks(prev.tick,tick); const distance=Math.hypot(dx,dy); const scale=distance>maxStep&&distance>0?maxStep/distance:1;
+    return {x:round6(prev.x+dx*scale),y:round6(prev.y+dy*scale),distance:round6(distance),maxStep:round6(maxStep),speedViolation:distance>maxStep+1e-9,tickViolation:tick<prev.tick};
+}
+function checkCommandTick(playerId,tick,previousTick){
+    if(tick<previousTick) return {ok:false,reason:`tick regression previous=${previousTick} got=${tick}`};
+    if(playerId===myId){ const max=currentTick()+6; return tick<=max?{ok:true}:{ok:false,reason:`future local tick got=${tick} max=${max}`}; }
+    const anchor=tickAnchors.get(playerId);
+    if(!anchor){ const max=previousTick+MAX_TICK_ADVANCE; return tick<=max?{ok:true}:{ok:false,reason:`unanchored future tick got=${tick} max=${max}`}; }
+    const elapsed=Math.max(0,Math.floor((performance.now()-anchor.localTime)/TICK_MS)); const max=anchor.remoteTick+elapsed+12;
+    return tick<=max?{ok:true}:{ok:false,reason:`future remote tick got=${tick} max=${max}`};
+}
+function inBounds(x,y){ return Number.isFinite(x)&&Number.isFinite(y)&&x>=10&&y>=10&&x<=canvas.clientWidth-10&&y<=canvas.clientHeight-10; }
 
-setInterval(() => {
-    if (isSignalReady()) sendSignal({ type: 'announce' });
-}, 3000);
-
-function shutdownLocalPeer() {
-    if (pageUnloading) return;
-    pageUnloading = true;
-    signalManualClose = true;
-    clearSignalTimers();
-
-    // 가능하면 명시적 leave를 먼저 보낸다. 전달되지 않아도 WebRTC 종료 감지가 최종 폴백이다.
-    for (const [peerId, peer] of [...peers]) {
-        try {
-            if (peer.dc?.readyState === 'open') {
-                peer.dc.send(JSON.stringify({ kind: 'leave', peerId: myId }));
-            }
-        } catch (_) {}
-        try { sendSignal({ type: 'leave', to: peerId }); } catch (_) {}
+function getPredictedTail(playerId){
+    const ids=pendingOrderByPlayer.get(playerId)||[];
+    for(let i=ids.length-1;i>=0;i--){ const pending=pendingById.get(ids[i]); if(pending?.nextState) return pending.nextState; }
+    return confirmedWorld[playerId]||null;
+}
+function makeBaseCommand(type,previous){
+    const sequence=++localSequence; const membership=membershipDescriptor();
+    return {protocol:PROTOCOL,type,commandId:createCommandId(myId,sequence),playerId:myId,sequence,previousStateHash:stateHash(previous),tick:currentTick(),membershipIds:membership.membershipIds,membershipHash:membership.membershipHash,epochId:membership.epochId,aoiRadius:AOI_RADIUS};
+}
+function makeMoveCommand(dx,dy){
+    const prev=getPredictedTail(myId); if(!prev||!prev.alive) return null;
+    const command=makeBaseCommand('move',prev); const result=computeMove(prev,dx,dy,command.tick);
+    return {...command,dx:round6(dx),dy:round6(dy),claimedX:result.x,claimedY:result.y};
+}
+function buildShootCheckpoint(shooter){
+    const membership=membershipDescriptor(); const checkpoint=[]; const world=Object.create(null);
+    const interestRadius=Math.max(AOI_RADIUS,MAX_RANGE+HIT_RADIUS+24);
+    for(const id of membership.membershipIds){
+        const state=id===myId?shooter:confirmedWorld[id];
+        if(!state) continue;
+        if(id!==myId&&distanceBetweenStates(shooter,state)>interestRadius) continue;
+        const item={playerId:id,x:round6(state.x),y:round6(state.y),alive:Boolean(state.alive),lifeId:state.lifeId,sequence:state.sequence};
+        checkpoint.push(item); world[id]=item;
     }
-
-    signalingSocketGeneration++;
-    try { signalingSocket?.close(1000, 'page unload'); } catch (_) {}
-    try { localSignalChannel?.close(); } catch (_) {}
-
-    for (const peerId of [...peers.keys()]) removePeer(peerId, 'local page unload');
+    checkpoint.sort((a,b)=>a.playerId.localeCompare(b.playerId));
+    networkMetrics.lastCheckpointPlayers=checkpoint.length;
+    return {membership,checkpoint,world};
+}
+function makeShootCommand(dirX,dirY){
+    const shooter=getPredictedTail(myId); if(!shooter||!shooter.alive) return null;
+    const data=buildShootCheckpoint(shooter); if(!data){ log('t-warn','shoot blocked: checkpoint incomplete'); return null; }
+    const command=makeBaseCommand('shoot',shooter); const originX=round6(shooter.x),originY=round6(shooter.y);
+    const hitId=rayHit(originX,originY,dirX,dirY,data.world,myId);
+    return {...command,membershipIds:data.membership.membershipIds,membershipHash:data.membership.membershipHash,originX,originY,dirX:round6(dirX),dirY:round6(dirY),checkpoint:data.checkpoint,checkpointHash:stableHash(data.checkpoint),claimedHitId:hitId,claimedHitLifeId:hitId?data.world[hitId].lifeId:null};
+}
+function makeHealCommand(){
+    const prev=getPredictedTail(myId); if(!prev||!prev.alive||prev.hp>=MAX_HP) return null;
+    const command=makeBaseCommand('heal',prev); return {...command,claimedHp:prev.hp+1};
+}
+function makeRespawnCommand(){
+    const prev=getPredictedTail(myId); if(!prev||prev.alive) return null;
+    const command=makeBaseCommand('respawn',prev); return {...command,spawnX:round6(randomSpawnX()),spawnY:round6(randomSpawnY()),nextLifeId:prev.lifeId+1};
 }
 
-window.addEventListener('pagehide', shutdownLocalPeer, { once: true });
-window.addEventListener('beforeunload', shutdownLocalPeer, { once: true });
+function validateEnvelope(remoteId,command){
+    if(!command||command.protocol!==PROTOCOL) return 'unsupported protocol';
+    if(!['move','shoot','heal','respawn'].includes(command.type)) return 'unsupported command';
+    if(command.playerId!==remoteId) return `identity mismatch channel=${remoteId} payload=${command.playerId}`;
+    if(typeof command.commandId!=='string'||command.commandId.length>128) return 'invalid commandId';
+    if(!Number.isSafeInteger(command.sequence)||command.sequence<1) return 'invalid sequence';
+    if(!Number.isSafeInteger(command.tick)||command.tick<0) return 'invalid tick';
+    if(typeof command.previousStateHash!=='string') return 'invalid previousStateHash';
+    if(typeof command.epochId!=='string'||command.epochId.length>32) return 'invalid epoch';
+    if(!Number.isFinite(command.aoiRadius)||command.aoiRadius<240||command.aoiRadius>1400) return 'invalid AOI radius';
+    if(!Array.isArray(command.membershipIds)||command.membershipIds.length<1||command.membershipIds.length>64) return 'invalid membership';
+    if(command.membershipIds.some(id=>typeof id!=='string'||id.length>96)) return 'invalid member id';
+    if(stableHash([...command.membershipIds].sort())!==command.membershipHash) return 'membership hash mismatch';
+    if(command.type==='move'&&![command.dx,command.dy,command.claimedX,command.claimedY].every(Number.isFinite)) return 'invalid move values';
+    if(command.type==='shoot'&&(![command.originX,command.originY,command.dirX,command.dirY].every(Number.isFinite)||!Array.isArray(command.checkpoint))) return 'invalid shoot values';
+    if(command.type==='heal'&&!Number.isSafeInteger(command.claimedHp)) return 'invalid heal value';
+    if(command.type==='respawn'&&(!Number.isFinite(command.spawnX)||!Number.isFinite(command.spawnY)||!Number.isSafeInteger(command.nextLifeId))) return 'invalid respawn values';
+    return null;
+}
 
-startSignalingTransport();
-updatePeerList();
-log('t-sys', `local peer boot id=${myId} protocol=${PROTOCOL} signalMode=${SIGNAL_MODE} room=${ROOM_ID}`);
+function executeLocal(command){
+    if(!command) return;
+    acceptCommand(command,false);
+    broadcast({kind:'command',command});
+}
+function receiveCommand(remoteId,command){
+    const error=validateEnvelope(remoteId,command); if(error){ invalidCounter++; log('t-err',`command rejected before audit: ${error}`); return; }
+    acceptCommand(command,true);
+}
+function rememberCommandId(id){ seenCommandIds.add(id); seenCommandQueue.push(id); if(seenCommandQueue.length>10000){ const old=seenCommandQueue.shift(); seenCommandIds.delete(old); } }
+function acceptCommand(command,remote){
+    if(seenCommandIds.has(command.commandId)){ duplicateCounter++; return; }
+    rememberCommandId(command.commandId);
+    const expected=(confirmedSeq.get(command.playerId)||0)+(pendingOrderByPlayer.get(command.playerId)||[]).length+1;
+    if(command.sequence>expected){ deferredCommands.set(command.commandId,{command,remote}); log('t-warn',`command deferred player=${command.playerId} expected=${expected} got=${command.sequence}`); return; }
+    if(command.sequence<expected){ rejectedCounter++; log('t-warn',`stale command player=${command.playerId} expected=${expected} got=${command.sequence}`); return; }
+    const previous=getPredictedTail(command.playerId);
+    if(!previous||stateHash(previous)!==command.previousStateHash){ rejectedCounter++; log('t-warn',`state hash mismatch id=${command.commandId}`); return; }
+    const pending={command,previousState:{...previous},nextState:predictNextState(previous,command),receipts:new Map(),verdict:null,stalled:false,timeoutId:null,remote,receivedAt:performance.now()};
+    pendingById.set(command.commandId,pending);
+    const order=pendingOrderByPlayer.get(command.playerId)||[]; order.push(command.commandId); pendingOrderByPlayer.set(command.playerId,order);
+    if(command.type==='shoot') spawnBullet(command);
+    const validators=validatorsFor(command); const quorum=quorumFor(command);
+    log('t-cmd',`${command.type} tentative id=${command.commandId} seq=${command.sequence} validators=${validators.join(',')} quorum=${quorum}`);
+    const orphan=orphanReceipts.get(command.commandId); if(orphan){ for(const receipt of orphan.values()) applyReceipt(receipt.validatorId,receipt); orphanReceipts.delete(command.commandId); }
+    if(validators.includes(myId)) runAudit(command);
+    pending.timeoutId=setTimeout(()=>{ const live=pendingById.get(command.commandId); if(live&&!live.verdict&&!live.stalled){ live.stalled=true; stalledCounter++; log('t-warn',`STALLED id=${command.commandId} committee=${validators.join(',')} receipts=${live.receipts.size}/${quorum}`); } },AUDIT_STALL_MS);
+}
+function predictNextState(previous,command){
+    if(command.type==='move'){
+        const result=computeMove(previous,command.dx,command.dy,command.tick);
+        return {...previous,x:result.x,y:result.y,tick:command.tick,sequence:command.sequence,tentative:true};
+    }
+    if(command.type==='heal') return {...previous,hp:Math.min(MAX_HP,previous.hp+1),tick:command.tick,sequence:command.sequence,tentative:true};
+    if(command.type==='respawn') return {...previous,x:command.spawnX,y:command.spawnY,hp:MAX_HP,alive:true,lifeId:command.nextLifeId,tick:command.tick,sequence:command.sequence,deadObservedAt:0,tentative:true};
+    return {...previous,tick:command.tick,sequence:command.sequence,tentative:true};
+}
 
+function runAudit(command){
+    const pending=pendingById.get(command.commandId); if(!pending) return;
+    let accepted=false,reason='',computed=null;
+    const previous=pending.previousState;
+    const tickCheck=checkCommandTick(command.playerId,command.tick,previous.tick);
+    if(!membershipMatches(command)){ membershipMismatchCounter++; reason='membership mismatch'; }
+    else if(!tickCheck.ok){ reason=tickCheck.reason; }
+    else if(command.type==='move'){
+        const result=computeMove(previous,command.dx,command.dy,command.tick);
+        accepted=previous.alive&&!result.speedViolation&&!result.tickViolation&&result.x===command.claimedX&&result.y===command.claimedY&&inBounds(result.x,result.y);
+        reason=accepted?'move verified':`move invalid distance=${result.distance} max=${result.maxStep}`; computed=result;
+    }else if(command.type==='shoot'){
+        const length=Math.hypot(command.dirX,command.dirY);
+        const originMatches=Math.hypot(previous.x-command.originX,previous.y-command.originY)<1.5;
+        const checkpointOk=stableHash(command.checkpoint)===command.checkpointHash&&checkpointMatchesLocal(command.checkpoint,command.playerId,previous);
+        const world=Object.create(null); for(const item of command.checkpoint) world[item.playerId]=item;
+        const hit=rayHit(command.originX,command.originY,command.dirX,command.dirY,world,command.playerId);
+        const life=hit?world[hit]?.lifeId:null;
+        accepted=previous.alive&&Math.abs(length-1)<0.02&&originMatches&&checkpointOk&&hit===command.claimedHitId&&life===command.claimedHitLifeId&&command.aoiRadius===AOI_RADIUS;
+        reason=accepted?'shoot verified':`shoot invalid hit=${hit||'none'} checkpoint=${checkpointOk}`; computed={hit,life};
+    }else if(command.type==='heal'){
+        const activity=activityAnchors.get(command.playerId);
+        const idleMs=activity?performance.now()-Math.max(activity.lastMoveAt,activity.lastDamageAt,activity.lastHealAt):0;
+        accepted=previous.alive&&previous.hp<MAX_HP&&idleMs>=900&&command.claimedHp===previous.hp+1;
+        reason=accepted?'heal verified':`heal invalid hp=${previous.hp} idleMs=${Math.round(idleMs)}`;
+    }else if(command.type==='respawn'){
+        const deathAge=performance.now()-(previous.deadObservedAt||0);
+        accepted=!previous.alive&&deathAge>=RESPAWN_MS-300&&command.nextLifeId===previous.lifeId+1&&inBounds(command.spawnX,command.spawnY);
+        reason=accepted?'respawn verified':`respawn invalid deadAge=${Math.round(deathAge)}ms`;
+    }
+    const receipt={protocol:PROTOCOL,commandId:command.commandId,playerId:command.playerId,sequence:command.sequence,validatorId:myId,accepted,reason,computed};
+    applyReceipt(myId,receipt); broadcast({kind:'receipt',receipt});
+}
+function checkpointMatchesLocal(checkpoint,shooterId,shooterState){
+    if(!Array.isArray(checkpoint)||checkpoint.length>64) return false;
+    const interestRadius=Math.max(AOI_RADIUS,MAX_RANGE+HIT_RADIUS+24);
+    const expected=currentMembershipIds().filter(id=>{
+        const local=id===shooterId?shooterState:confirmedWorld[id];
+        return Boolean(local)&&(id===shooterId||distanceBetweenStates(shooterState,local)<=interestRadius);
+    }).sort();
+    const actual=checkpoint.map(item=>item?.playerId).sort();
+    if(expected.length!==actual.length||expected.some((id,index)=>id!==actual[index])) return false;
+    for(const item of checkpoint){
+        if(!item||typeof item.playerId!=='string'||![item.x,item.y].every(Number.isFinite)||!Number.isSafeInteger(item.lifeId)) return false;
+        const local=item.playerId===shooterId?shooterState:confirmedWorld[item.playerId];
+        if(!local) return false;
+        if(Math.hypot(local.x-item.x,local.y-item.y)>2.5||local.lifeId!==item.lifeId||Boolean(local.alive)!==Boolean(item.alive)) return false;
+    }
+    return true;
+}
+function receiveReceipt(remoteId,receipt){
+    if(!receipt||receipt.protocol!==PROTOCOL||receipt.validatorId!==remoteId){ invalidCounter++; log('t-err',`invalid receipt identity from=${remoteId}`); return; }
+    if(!pendingById.has(receipt.commandId)){
+        let bucket=orphanReceipts.get(receipt.commandId); if(!bucket){ bucket=new Map(); orphanReceipts.set(receipt.commandId,bucket); setTimeout(()=>orphanReceipts.delete(receipt.commandId),ORPHAN_RECEIPT_TTL_MS); }
+        bucket.set(remoteId,receipt); return;
+    }
+    applyReceipt(remoteId,receipt);
+}
+function applyReceipt(remoteId,receipt){
+    const pending=pendingById.get(receipt.commandId); if(!pending||pending.verdict) return;
+    const validators=validatorsFor(pending.command);
+    if(!validators.includes(remoteId)){ invalidCounter++; log('t-err',`unauthorized receipt validator=${remoteId}`); return; }
+    if(receipt.playerId!==pending.command.playerId||receipt.sequence!==pending.command.sequence) return;
+    pending.receipts.set(remoteId,receipt);
+    const accepted=[...pending.receipts.values()].filter(r=>r.accepted).length;
+    const rejected=[...pending.receipts.values()].filter(r=>!r.accepted).length;
+    const quorum=quorumFor(pending.command);
+    if(accepted>=quorum) pending.verdict='accepted';
+    else if(rejected>validators.length-quorum) { pending.verdict='rejected'; pending.rejectReason=[...pending.receipts.values()].filter(r=>!r.accepted).map(r=>`${r.validatorId}:${r.reason}`).join(' | '); }
+    if(pending.verdict){ clearTimeout(pending.timeoutId); drainCommits(pending.command.playerId); }
+}
+function drainCommits(playerId){
+    while(true){
+        const expected=(confirmedSeq.get(playerId)||0)+1;
+        const order=pendingOrderByPlayer.get(playerId)||[];
+        const id=order.find(commandId=>pendingById.get(commandId)?.command.sequence===expected);
+        if(!id) break;
+        const pending=pendingById.get(id); if(!pending.verdict) break;
+        if(pending.verdict==='accepted') commitCommand(pending.command,pending);
+        else rejectCommand(pending.command,pending.rejectReason||'validator rejected');
+    }
+    rebuildVisible(playerId);
+    acceptDeferred(playerId);
+}
+function commitCommand(command,pending){
+    const current=confirmedWorld[command.playerId]||pending.previousState;
+    let state={...pending.nextState,tentative:false};
+
+    // 이동·사격 명령이 대기 중일 때 피격되더라도 옛 HP로 되돌리지 않는다.
+    if(command.type==='move'||command.type==='shoot'){
+        state={...state,hp:current.hp,alive:current.alive,lifeId:current.lifeId,deadObservedAt:current.deadObservedAt};
+    }else if(command.type==='heal'){
+        state={...state,hp:current.alive?Math.min(MAX_HP,current.hp+1):current.hp,alive:current.alive,lifeId:current.lifeId,deadObservedAt:current.deadObservedAt};
+    }
+
+    confirmedWorld[command.playerId]=state;
+    confirmedSeq.set(command.playerId,command.sequence);
+    const commitNow=performance.now();
+    tickAnchors.set(command.playerId,{remoteTick:command.tick,localTime:commitNow});
+    const activity=activityAnchors.get(command.playerId)||{lastMoveAt:commitNow,lastDamageAt:commitNow,lastHealAt:commitNow};
+    if(command.type==='move') activity.lastMoveAt=commitNow;
+    if(command.type==='heal') activity.lastHealAt=commitNow;
+    if(command.type==='respawn') activity.lastMoveAt=activity.lastDamageAt=activity.lastHealAt=commitNow;
+    activityAnchors.set(command.playerId,activity);
+    removePending(command);
+    confirmedCounter++;
+    const latency=Math.max(0,performance.now()-pending.receivedAt); commitLatencySamples.push(latency); if(commitLatencySamples.length>COMMIT_LATENCY_SAMPLES) commitLatencySamples.shift();
+    if(command.type==='shoot'&&command.claimedHitId) registerConfirmedHit(command);
+    if(command.type==='respawn') onRespawnCommitted(command,state);
+    log('t-audit',`CONFIRMED seq=${command.sequence} type=${command.type} id=${command.commandId}`);
+}
+function rejectCommand(command,reason){
+    removePending(command); rejectedCounter++; log('t-warn',`REJECTED seq=${command.sequence} id=${command.commandId} reason=${reason}`);
+    if(command.playerId===myId) localSequence=(confirmedSeq.get(myId)||0)+(pendingOrderByPlayer.get(myId)||[]).length;
+    rejectDependents(command.playerId,command.sequence);
+}
+function rejectDependents(playerId,sequence){
+    for(const id of [...(pendingOrderByPlayer.get(playerId)||[])]){ const pending=pendingById.get(id); if(pending&&pending.command.sequence>sequence){ clearTimeout(pending.timeoutId); pendingById.delete(id); rejectedCounter++; log('t-warn',`dependent rollback id=${id}`); } }
+    pendingOrderByPlayer.set(playerId,(pendingOrderByPlayer.get(playerId)||[]).filter(id=>pendingById.has(id)));
+}
+function removePending(command){
+    const pending=pendingById.get(command.commandId); if(pending) clearTimeout(pending.timeoutId);
+    pendingById.delete(command.commandId);
+    pendingOrderByPlayer.set(command.playerId,(pendingOrderByPlayer.get(command.playerId)||[]).filter(id=>id!==command.commandId));
+}
+function rebuildVisible(playerId){
+    const base=confirmedWorld[playerId]; if(!base) return;
+    let state={...base,tentative:false};
+    for(const id of pendingOrderByPlayer.get(playerId)||[]){ const pending=pendingById.get(id); if(!pending) continue; pending.previousState={...state}; pending.nextState=predictNextState(state,pending.command); state={...pending.nextState}; }
+    visibleWorld[playerId]=state;
+}
+function acceptDeferred(playerId){
+    let progressed=true;
+    while(progressed){ progressed=false; const expected=(confirmedSeq.get(playerId)||0)+(pendingOrderByPlayer.get(playerId)||[]).length+1;
+        const item=[...deferredCommands.values()].find(entry=>entry.command.playerId===playerId&&entry.command.sequence===expected);
+        if(item){ deferredCommands.delete(item.command.commandId); seenCommandIds.delete(item.command.commandId); acceptCommand(item.command,item.remote); progressed=true; }
+    }
+}
+
+function rayHit(originX,originY,dirX,dirY,world,excludeId){
+    let closest=null,closestProjection=Infinity;
+    for(const [id,state] of Object.entries(world)){
+        if(id===excludeId||!state||!state.alive) continue;
+        const px=state.x-originX,py=state.y-originY,projection=px*dirX+py*dirY;
+        if(projection<0||projection>MAX_RANGE) continue;
+        const cx=originX+dirX*projection,cy=originY+dirY*projection;
+        if(Math.hypot(state.x-cx,state.y-cy)<=HIT_RADIUS&&projection<closestProjection){ closest=id; closestProjection=projection; }
+    }
+    return closest;
+}
+
+function contributorKey(victimId,lifeId){ return `${victimId}:${lifeId}`; }
+function registerConfirmedHit(command){
+    const victim=confirmedWorld[command.claimedHitId];
+    if(!victim||!victim.alive||victim.lifeId!==command.claimedHitLifeId) return;
+
+    const now=performance.now();
+    const activity=activityAnchors.get(command.claimedHitId)||{lastMoveAt:now,lastDamageAt:now,lastHealAt:now};
+    activity.lastDamageAt=now;
+    activityAnchors.set(command.claimedHitId,activity);
+
+    victim.hp=Math.max(0,victim.hp-1);
+    hitFlashes[command.claimedHitId]=now+180;
+    const key=contributorKey(command.claimedHitId,victim.lifeId);
+    const contributors=damageContributors.get(key)||new Map();
+    contributors.set(command.playerId,Date.now());
+    damageContributors.set(key,contributors);
+
+    if(victim.hp===0){
+        victim.alive=false;
+        victim.deadObservedAt=now;
+        delete moveState[command.claimedHitId];
+        const assists=[...contributors.keys()].filter(id=>id!==command.playerId);
+        registerKillOutcome(command.claimedHitId,victim.lifeId,command.playerId,assists,command.commandId);
+        log('t-warn',`DEAD victim=${command.claimedHitId} killer=${command.playerId}`);
+    }
+    rebuildVisible(command.claimedHitId);
+}
+function registerKillOutcome(victimId,lifeId,killerId,assists,sourceHitId){
+    const id=`${victimId}:${lifeId}`;
+    if(killEvents.has(id)) return;
+    const event={id,killerId,victimId,assists,occurredAt:Date.now(),sourceHitId};
+    killEvents.set(id,event);
+    log('t-cmd',`KILL ${killerId} → ${victimId}${assists.length?` assists=${assists.join(',')}`:''}`);
+    renderKillFeed();
+    updateKda();
+}
+function onRespawnCommitted(command,state){
+    for(const key of [...damageContributors.keys()]) if(key.startsWith(`${command.playerId}:`)&&key!==contributorKey(command.playerId,state.lifeId)) damageContributors.delete(key);
+    delete hitFlashes[command.playerId];
+    if(command.playerId===myId) log('t-cmd',`RESPAWN life=${state.lifeId}`);
+}
+
+function spawnBullet(command){ bullets.push({x1:command.originX,y1:command.originY,x2:command.originX+command.dirX*MAX_RANGE,y2:command.originY+command.dirY*MAX_RANGE,born:performance.now(),color:visibleWorld[command.playerId]?.color||'#fff'}); }
+function startMove(playerId,fromX,fromY,toX,toY){
+    const distance=Math.hypot(toX-fromX,toY-fromY); const duration=Math.min(MOVE_MAX_DURATION,Math.max(MOVE_MIN_DURATION,distance/MOVE_SPEED*1000)); const now=performance.now();
+    moveState[playerId]={startX:fromX,startY:fromY,targetX:toX,targetY:toY,startTime:now,naturalDuration:duration,hardStopAt:now+MOVE_MAX_DURATION,lastX:fromX,lastY:fromY};
+    if(playerId===myId) sendToAoi({kind:'moveIntent',intent:{playerId,startX:fromX,startY:fromY,targetX:toX,targetY:toY,naturalDuration:duration,maxDuration:MOVE_MAX_DURATION}},visibleWorld[myId]);
+}
+function receiveMoveIntent(remoteId,intent){
+    if(!intent||intent.playerId!==remoteId||![intent.startX,intent.startY,intent.targetX,intent.targetY,intent.naturalDuration].every(Number.isFinite)) return;
+    if(!confirmedWorld[remoteId]?.alive) return;
+    const now=performance.now(); moveState[remoteId]={startX:intent.startX,startY:intent.startY,targetX:intent.targetX,targetY:intent.targetY,startTime:now,naturalDuration:Math.min(MOVE_MAX_DURATION,Math.max(1,intent.naturalDuration)),hardStopAt:now+MOVE_MAX_DURATION,lastX:intent.startX,lastY:intent.startY};
+}
+function evalMove(movement,now){ const progress=Math.max(0,Math.min(1,(now-movement.startTime)/movement.naturalDuration)); const eased=progress<.5?2*progress*progress:1-Math.pow(-2*progress+2,2)/2; return {x:movement.startX+(movement.targetX-movement.startX)*eased,y:movement.startY+(movement.targetY-movement.startY)*eased,finished:progress>=1||now>=movement.hardStopAt}; }
+function getRenderPosition(playerId){ const state=visibleWorld[playerId]; if(!state) return null; const movement=moveState[playerId]; return movement?evalMove(movement,performance.now()):state; }
+function tickMovement(){
+    const now=performance.now(); const movement=moveState[myId]; if(!movement) return;
+    const me=getPredictedTail(myId); if(!me?.alive){ delete moveState[myId]; return; }
+    const evaluated=evalMove(movement,now),dx=evaluated.x-movement.lastX,dy=evaluated.y-movement.lastY;
+    if(Math.abs(dx)>.05||Math.abs(dy)>.05) executeLocal(makeMoveCommand(dx,dy));
+    movement.lastX=evaluated.x; movement.lastY=evaluated.y; if(evaluated.finished) delete moveState[myId];
+}
+function tickCombat(){
+    const me=getPredictedTail(myId); if(!me) return;
+    if(!me.alive){ delete moveState[myId]; const confirmed=confirmedWorld[myId]; if(confirmed&&!hasPendingType(myId,'respawn')&&performance.now()-(confirmed.deadObservedAt||0)>=RESPAWN_MS) executeLocal(makeRespawnCommand()); return; }
+    if(me.hp<MAX_HP&&!hasPendingType(myId,'heal')){ const activity=activityAnchors.get(myId); const idleMs=activity?performance.now()-Math.max(activity.lastMoveAt,activity.lastDamageAt,activity.lastHealAt):0; if(idleMs>=1000) executeLocal(makeHealCommand()); }
+}
+function hasPendingType(playerId,type){ return (pendingOrderByPlayer.get(playerId)||[]).some(id=>pendingById.get(id)?.command.type===type); }
+
+function sendSnapshot(remoteId){
+    const peer=peers.get(remoteId); if(peer?.dc?.readyState!=='open') return;
+    const state=confirmedWorld[myId]; const snapshot={protocol:PROTOCOL,senderId:myId,clockTick:currentTick(),state:{...state,deadObservedAt:0},stateHash:stateHash(state)};
+    safeDataSend(remoteId,{kind:'snapshot',snapshot});
+}
+function receiveSnapshot(remoteId,snapshot){
+    if(!snapshot||snapshot.protocol!==PROTOCOL||snapshot.senderId!==remoteId||!snapshot.state) return;
+    const state=snapshot.state;
+    if(![state.x,state.y].every(Number.isFinite)||!Number.isSafeInteger(state.sequence)||!Number.isSafeInteger(state.lifeId)||!Number.isSafeInteger(state.hp)) return;
+    const localSeq=confirmedSeq.get(remoteId)||0; if(state.sequence<localSeq) return;
+    const normalized={...state,color:state.color||colorFor(remoteId),hp:Math.max(0,Math.min(MAX_HP,state.hp)),alive:Boolean(state.alive),deadObservedAt:state.alive?0:performance.now(),tentative:false};
+    confirmedWorld[remoteId]=normalized; visibleWorld[remoteId]={...normalized}; confirmedSeq.set(remoteId,normalized.sequence);
+    const now=performance.now();
+    tickAnchors.set(remoteId,{remoteTick:Number.isSafeInteger(snapshot.clockTick)?snapshot.clockTick:normalized.tick,localTime:now});
+    activityAnchors.set(remoteId,{lastMoveAt:now,lastDamageAt:now,lastHealAt:now});
+    log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence} hp=${normalized.hp} alive=${normalized.alive}`);
+}
+
+function byteLength(text){ return new TextEncoder().encode(text).byteLength; }
+function noteTraffic(direction,kind,bytes){
+    const prefix=direction==='tx'?'tx':'rx'; networkMetrics[`${prefix}Bytes`]+=bytes; networkMetrics[`${prefix}Messages`]++; networkMetrics[`${prefix}BytesWindow`]+=bytes; networkMetrics[`${prefix}MessagesWindow`]++;
+    const key=`${direction}:${kind||'unknown'}`; networkMetrics.byKind[key]=(networkMetrics.byKind[key]||0)+bytes;
+}
+function safeDataSend(remoteId,message){
+    const peer=peers.get(remoteId); if(peer?.dc?.readyState!=='open') return false;
+    try{ const payload=JSON.stringify(message); peer.dc.send(payload); noteTraffic('tx',message.kind,byteLength(payload)); return true; }
+    catch(error){ log('t-sys',`send skipped peer=${remoteId}: ${error.message}`); removePeer(remoteId,'send failed'); return false; }
+}
+function broadcast(message){ for(const [id,peer] of [...peers]) if(peer.dc?.readyState==='open') safeDataSend(id,message); }
+function handleWireMessage(remoteId,raw){
+    let message; try{ if(typeof raw!=='string'||raw.length>128*1024) throw new Error('message too large'); message=JSON.parse(raw); noteTraffic('rx',message.kind,byteLength(raw)); }catch(error){ invalidCounter++; log('t-err',`invalid JSON from=${remoteId}: ${error.message}`); return; }
+    if(message.kind==='command') receiveCommand(remoteId,message.command);
+    else if(message.kind==='receipt') receiveReceipt(remoteId,message.receipt);
+    else if(message.kind==='snapshot') receiveSnapshot(remoteId,message.snapshot);
+    else if(message.kind==='moveIntent') receiveMoveIntent(remoteId,message.intent);
+    else invalidCounter++;
+}
+
+function updateSignalStatus(state,label=state){ const el=document.getElementById('signalState'); el.dataset.state=state; el.textContent=label; }
+function signalLog(className,message,detail=null){ const line=`[SIGNAL] ${message}`; log(className,line); const method=className==='t-err'?'error':className==='t-sig'?'info':'debug'; detail==null?console[method](line):console[method](line,detail); }
+function startSignaling(){
+    if(!SIGNAL_URL){ updateSignalStatus('error','missing signal URL'); signalLog('t-err','signal query parameter is required'); return; }
+    signalManualClose=false; connectSignaling();
+}
+function connectSignaling(){
+    if(signalManualClose||!SIGNAL_URL) return;
+    if(signalingSocket&&[WebSocket.CONNECTING,WebSocket.OPEN].includes(signalingSocket.readyState)) return;
+    clearTimeout(signalReconnectTimer); clearTimeout(signalConnectTimeout); const generation=++signalingGeneration;
+    updateSignalStatus('connecting','connecting'); signalLog('t-sig',`connecting url=${SIGNAL_URL} room=${ROOM_ID} attempt=${signalReconnectAttempt+1}`);
+    let socket; try{ socket=new WebSocket(SIGNAL_URL); }catch(error){ signalLog('t-err',`constructor failed: ${error.message}`); scheduleReconnect('constructor failure'); return; }
+    signalingSocket=socket;
+    signalConnectTimeout=setTimeout(()=>{ if(generation===signalingGeneration&&socket.readyState===WebSocket.CONNECTING) try{socket.close(4000,'connect timeout');}catch(_){} },SIGNAL_CONNECT_TIMEOUT_MS);
+    socket.onopen=()=>{
+        if(generation!==signalingGeneration) return; clearTimeout(signalConnectTimeout); signalReconnectAttempt=0; updateSignalStatus('open','open'); signalLog('t-sig',`open url=${SIGNAL_URL}`);
+        socket.send(JSON.stringify({type:'join',channelId:ROOM_ID,peerId:myId,signalProtocol:SIGNAL_PROTOCOL})); signalLog('t-sig',`join sent room=${ROOM_ID} peer=${myId}`); sendSignal({type:'announce'});
+        clearInterval(signalKeepaliveTimer); signalKeepaliveTimer=setInterval(()=>sendSignal({type:'keepalive',to:myId}),SIGNAL_KEEPALIVE_MS);
+    };
+    socket.onmessage=event=>{ if(generation!==signalingGeneration||typeof event.data!=='string') return; try{ handleSignalMessage(JSON.parse(event.data)); }catch(error){ signalLog('t-err',`invalid signaling JSON: ${error.message}`); } };
+    socket.onerror=event=>{ if(generation!==signalingGeneration) return; updateSignalStatus('error','error'); signalLog('t-err','WebSocket error',event); };
+    socket.onclose=event=>{ if(generation!==signalingGeneration) return; clearTimeout(signalConnectTimeout); clearInterval(signalKeepaliveTimer); signalingSocket=null; updateSignalStatus('closed',`closed ${event.code}`); signalLog(signalManualClose?'t-sys':'t-err',`closed code=${event.code} reason=${event.reason||'none'}`); scheduleReconnect(`close ${event.code}`); };
+}
+function sendSignal(message){
+    if(signalingSocket?.readyState!==WebSocket.OPEN) return false;
+    try{ signalingSocket.send(JSON.stringify({...message,from:myId,signalProtocol:SIGNAL_PROTOCOL,signalTick:currentTick()})); return true; }catch(error){ signalLog('t-err',`send failed type=${message.type}: ${error.message}`); return false; }
+}
+function scheduleReconnect(reason){
+    if(signalManualClose) return; clearTimeout(signalReconnectTimer); const base=Math.min(SIGNAL_RECONNECT_MAX_MS,SIGNAL_RECONNECT_BASE_MS*(2**Math.min(signalReconnectAttempt,6))); const delay=Math.round(base*(.85+Math.random()*.3)); signalReconnectAttempt++; updateSignalStatus('reconnecting',`retry ${Math.ceil(delay/1000)}s`); signalLog('t-sig',`reconnect in ${delay}ms reason=${reason}`); signalReconnectTimer=setTimeout(connectSignaling,delay);
+}
+async function handleSignalMessage(message){
+    if(!message||message.from===myId||typeof message.from!=='string'||(message.to&&message.to!==myId)) return;
+    try{
+        if(message.type==='announce'){
+            signalLog('t-sig',`announce received from=${message.from}`);
+            if(myId<message.from&&!peers.has(message.from)) await createPeer(message.from,true);
+            else if(!peers.has(message.from)) peers.set(message.from,{pc:null,dc:null,state:'awaiting-offer',remoteId:message.from,pendingIce:[]});
+        }else if(message.type==='offer') await createPeer(message.from,false,message.sdp);
+        else if(message.type==='answer'){ const peer=peers.get(message.from); if(peer?.pc){ await peer.pc.setRemoteDescription(message.sdp); await flushIce(peer); } }
+        else if(message.type==='ice'){
+            const peer=peers.get(message.from); if(peer?.pc){ if(peer.pc.remoteDescription) await peer.pc.addIceCandidate(message.candidate); else peer.pendingIce.push(message.candidate); }
+            else{ const list=prePeerIce.get(message.from)||[]; list.push(message.candidate); prePeerIce.set(message.from,list); }
+        }else if(message.type==='leave') removePeer(message.from,'signaling leave');
+    }catch(error){ signalLog('t-err',`handling failed type=${message.type} from=${message.from}: ${error.message}`); }
+}
+function reconnectSignaling(){
+    clearTimeout(signalReconnectTimer); clearTimeout(signalConnectTimeout); clearInterval(signalKeepaliveTimer); signalManualClose=false;
+    const old=signalingSocket; signalingSocket=null; signalingGeneration++; try{old?.close(1000,'manual reconnect');}catch(_){} signalReconnectAttempt=0; connectSignaling();
+}
+window.reconnectSignaling=reconnectSignaling;
+
+async function flushIce(peer){
+    if(!peer?.pc?.remoteDescription) return; const queued=peer.pendingIce||[]; peer.pendingIce=[];
+    for(const candidate of queued) try{ await peer.pc.addIceCandidate(candidate); }catch(error){ log('t-err',`ICE rejected peer=${peer.remoteId}: ${error.message}`); }
+}
+async function createPeer(remoteId,isOfferer,remoteSdp){
+    const existing=peers.get(remoteId); if(existing?.pc&&!['closed','failed'].includes(existing.pc.connectionState)) return;
+    const pc=new RTCPeerConnection(STUN); const entry={pc,dc:null,state:'connecting',remoteId,pendingIce:[...(existing?.pendingIce||[]),...(prePeerIce.get(remoteId)||[])]}; prePeerIce.delete(remoteId); peers.set(remoteId,entry);
+    pc.onicecandidate=event=>{ if(event.candidate) sendSignal({type:'ice',to:remoteId,candidate:event.candidate}); };
+    pc.onconnectionstatechange=()=>{
+        if(pageUnloading||tearingDownPeers.has(remoteId)||peers.get(remoteId)!==entry) return; entry.state=pc.connectionState; clearTimeout(disconnectTimers.get(remoteId)); disconnectTimers.delete(remoteId);
+        if(pc.connectionState==='disconnected'){ const timer=setTimeout(()=>{ if(peers.get(remoteId)===entry&&entry.pc.connectionState==='disconnected') removePeer(remoteId,'disconnect timeout'); },DISCONNECT_GRACE_MS); disconnectTimers.set(remoteId,timer); }
+        else if(['failed','closed'].includes(pc.connectionState)) removePeer(remoteId,`peer connection ${pc.connectionState}`);
+        updatePeerList();
+    };
+    const bindChannel=dc=>{
+        entry.dc=dc;
+        dc.onopen=()=>{ if(pageUnloading||peers.get(remoteId)!==entry) return; log('t-sig',`DataChannel open ↔ ${remoteId}`); refreshMembership('data channel open'); sendSnapshot(remoteId); updatePeerList(); };
+        dc.onmessage=event=>{ if(!pageUnloading&&peers.get(remoteId)===entry) handleWireMessage(remoteId,event.data); };
+        dc.onclose=()=>{ if(!pageUnloading&&peers.get(remoteId)===entry) removePeer(remoteId,'data channel closed'); };
+        dc.onerror=event=>{ if(!pageUnloading) log('t-err',`DataChannel error ↔ ${remoteId}: ${event?.message||'unknown'}`); };
+    };
+    if(isOfferer){ bindChannel(pc.createDataChannel('arena-v8',{ordered:true})); const offer=await pc.createOffer(); await pc.setLocalDescription(offer); sendSignal({type:'offer',to:remoteId,sdp:offer}); }
+    else{ pc.ondatachannel=event=>bindChannel(event.channel); await pc.setRemoteDescription(remoteSdp); await flushIce(entry); const answer=await pc.createAnswer(); await pc.setLocalDescription(answer); sendSignal({type:'answer',to:remoteId,sdp:answer}); }
+    updatePeerList();
+}
+function removePeer(remoteId,reason='unknown'){
+    if(!remoteId||remoteId===myId||tearingDownPeers.has(remoteId)) return false; const peer=peers.get(remoteId); if(!peer) return false; tearingDownPeers.add(remoteId); const wasMember=peer.dc?.readyState==='open';
+    try{
+        peers.delete(remoteId); clearTimeout(disconnectTimers.get(remoteId)); disconnectTimers.delete(remoteId);
+        if(peer.dc){ peer.dc.onopen=peer.dc.onmessage=peer.dc.onclose=peer.dc.onerror=null; }
+        if(peer.pc){ peer.pc.onicecandidate=peer.pc.onconnectionstatechange=peer.pc.ondatachannel=null; }
+        try{ if(peer.dc?.readyState!=='closed') peer.dc?.close(); }catch(_){} try{ if(peer.pc?.connectionState!=='closed') peer.pc?.close(); }catch(_){}
+        delete confirmedWorld[remoteId]; delete visibleWorld[remoteId]; delete moveState[remoteId]; delete hitFlashes[remoteId]; confirmedSeq.delete(remoteId); tickAnchors.delete(remoteId); activityAnchors.delete(remoteId); prePeerIce.delete(remoteId);
+        for(const [id,pending] of [...pendingById]) if(pending.command.playerId===remoteId){ clearTimeout(pending.timeoutId); pendingById.delete(id); }
+        pendingOrderByPlayer.delete(remoteId);
+        if(!pageUnloading){ if(wasMember) refreshMembership('peer removed'); updatePeerList(); log('t-sys',`peer removed ↔ ${remoteId} (${reason})`); }
+        return true;
+    }finally{ tearingDownPeers.delete(remoteId); }
+}
+
+function resizeCanvas(){ canvas.width=canvas.clientWidth*devicePixelRatio; canvas.height=canvas.clientHeight*devicePixelRatio; context.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+window.addEventListener('resize',resizeCanvas); resizeCanvas();
+canvas.addEventListener('click',event=>{
+    const me=getPredictedTail(myId); if(!me?.alive) return; const rect=canvas.getBoundingClientRect(); const render=getRenderPosition(myId)||me; const dx=event.clientX-rect.left-render.x,dy=event.clientY-rect.top-render.y,distance=Math.hypot(dx,dy)||1; executeLocal(makeShootCommand(dx/distance,dy/distance));
+});
+canvas.addEventListener('contextmenu',event=>{
+    event.preventDefault(); const me=getPredictedTail(myId); if(!me?.alive) return; const rect=canvas.getBoundingClientRect(); const render=getRenderPosition(myId)||me; startMove(myId,render.x,render.y,event.clientX-rect.left,event.clientY-rect.top);
+});
+window.addEventListener('keydown',event=>{
+    let dx=0,dy=0; const step=16; if(event.key==='ArrowUp')dy=-step; else if(event.key==='ArrowDown')dy=step; else if(event.key==='ArrowLeft')dx=-step; else if(event.key==='ArrowRight')dx=step; else return;
+    event.preventDefault(); const me=getPredictedTail(myId); if(!me?.alive) return; delete moveState[myId]; executeLocal(makeMoveCommand(dx,dy));
+});
+
+function draw(){
+    const width=canvas.clientWidth,height=canvas.clientHeight; context.clearRect(0,0,width,height); const now=performance.now();
+    const localRender=getRenderPosition(myId); if(localRender){ context.beginPath(); context.arc(localRender.x,localRender.y,AOI_RADIUS,0,Math.PI*2); context.strokeStyle='rgba(61,220,151,.16)'; context.lineWidth=1; context.setLineDash([6,6]); context.stroke(); context.setLineDash([]); }
+    for(let i=bullets.length-1;i>=0;i--){ const bullet=bullets[i],age=now-bullet.born; if(age>BULLET_TRAIL_MS){ bullets.splice(i,1); continue; } context.globalAlpha=1-age/BULLET_TRAIL_MS; context.strokeStyle=bullet.color; context.lineWidth=1.5; context.beginPath(); context.moveTo(bullet.x1,bullet.y1); context.lineTo(bullet.x2,bullet.y2); context.stroke(); context.globalAlpha=1; }
+    for(const playerId in visibleWorld){
+        const state=visibleWorld[playerId],render=getRenderPosition(playerId); if(!render) continue; const isMe=playerId===myId; if(!isMe&&!isInLocalAoi(playerId)) continue; const flashing=now<(hitFlashes[playerId]||0),pending=(pendingOrderByPlayer.get(playerId)||[]).length>0;
+        context.beginPath(); context.arc(render.x,render.y,isMe?9:7,0,Math.PI*2); context.fillStyle=!state.alive?getComputedStyle(document.documentElement).getPropertyValue('--dead'):flashing?'#fff':state.color||'#888'; context.fill();
+        if(pending){ context.lineWidth=2; context.strokeStyle='#f2a93b'; context.stroke(); } else if(isMe){ context.lineWidth=2; context.strokeStyle='#fff'; context.stroke(); }
+        context.font='10px monospace'; context.fillStyle='#8fa3b0'; const hp=state.alive?`HP ${state.hp}/${MAX_HP}`:`DEAD ${Math.max(0,Math.ceil((RESPAWN_MS-(now-(state.deadObservedAt||now)))/1000))}s`; context.fillText(`${playerId}${isMe?' (you)':''} · ${hp}`,render.x+12,render.y+4);
+        if(state.alive){ const barWidth=34; context.fillStyle='rgba(28,39,51,.9)'; context.fillRect(render.x-barWidth/2,render.y-17,barWidth,4); context.fillStyle=state.hp===1?'#ef5b6e':state.hp===2?'#f2a93b':'#3ddc97'; context.fillRect(render.x-barWidth/2,render.y-17,barWidth*(state.hp/MAX_HP),4); }
+    }
+    updateOverlay(); requestAnimationFrame(draw);
+}
+function updateOverlay(){
+    const me=visibleWorld[myId]; if(!me) return; document.getElementById('healthValue').innerHTML=`HP <strong>${me.hp} / ${MAX_HP}</strong>`; const status=document.getElementById('localStatus');
+    if(me.alive){ status.textContent='alive'; status.style.color='var(--accent)'; }
+    else{ const remain=Math.max(0,Math.ceil((RESPAWN_MS-(performance.now()-(me.deadObservedAt||performance.now())))/1000)); status.textContent=`dead · respawn ${remain}s`; status.style.color='var(--err)'; }
+}
+function updateKda(){
+    const cutoff=Date.now()-KDA_WINDOW_MS; let k=0,d=0,a=0;
+    for(const event of killEvents.values()){ if(event.occurredAt<cutoff) continue; if(event.killerId===myId) k++; if(event.victimId===myId) d++; if(event.assists.includes(myId)) a++; }
+    document.getElementById('kdaValue').innerHTML=`<b>${k}</b> / ${d} / ${a}`;
+}
+function renderKillFeed(){
+    const rows=document.getElementById('killFeedRows'); const events=[...killEvents.values()].sort((a,b)=>b.occurredAt-a.occurredAt).slice(0,KILL_FEED_LIMIT); rows.textContent='';
+    if(!events.length){ const empty=document.createElement('div'); empty.className='killEmpty'; empty.textContent='아직 처치 기록 없음'; rows.appendChild(empty); return; }
+    for(const event of events){ const row=document.createElement('div'); row.className='killRow'; const killer=document.createElement('span'); killer.className='killKiller'; killer.textContent=displayName(event.killerId); const victim=document.createElement('span'); victim.className='killVictim'; victim.textContent=displayName(event.victimId); row.append(killer,document.createTextNode('  →  '),victim); if(event.assists.length){ const assist=document.createElement('span'); assist.className='killAssist'; assist.textContent=`  (+${event.assists.map(displayName).join(', ')})`; row.appendChild(assist); } rows.appendChild(row); }
+}
+function displayName(id){ return id===myId?`${id} (나)`:id; }
+function updatePeerList(){
+    document.getElementById('connCount').textContent=[...peers.values()].filter(peer=>peer.dc?.readyState==='open').length; const element=document.getElementById('peerList'); element.textContent='';
+    if(!peers.size){ const empty=document.createElement('span'); empty.style.color='var(--dim)'; empty.textContent='다른 유저 대기 중...'; element.appendChild(empty); return; }
+    for(const [id,peer] of peers){ const row=document.createElement('div'); row.className='peerRow'; const connected=peer.dc?.readyState==='open'; const left=document.createElement('span'); const dot=document.createElement('span'); dot.className='dot'; dot.style.background=connected?'var(--accent)':'var(--warn)'; left.append(dot,document.createTextNode(id)); const right=document.createElement('span'); right.textContent=connected?(isInLocalAoi(id)?'AOI':'far'):peer.state; right.style.color=connected?'var(--accent)':'var(--warn)'; row.append(left,right); element.appendChild(row); }
+}
+
+const logElement=document.getElementById('log'); const logEmpty=document.getElementById('logEmpty');
+function classifyLog(className,message){
+    if(className==='t-err') return {level:'error',category:'system'}; if(className==='t-warn') return {level:'warn',category:message.includes('DEAD')?'combat':'system'}; if(className==='t-sig'||message.startsWith('[SIGNAL]')) return {level:'info',category:'signal'}; if(className==='t-cmd'||className==='t-audit') return {level:'info',category:'combat'}; return {level:'info',category:'system'};
+}
+function log(className,message){ const meta=classifyLog(className,message); pendingLogs.push({className,message,level:meta.level,category:meta.category,time:new Date().toLocaleTimeString('ko-KR',{hour12:false})}); }
+function matchesLog(item){ if(activeLogFilter==='all') return true; if(activeLogFilter==='error'||activeLogFilter==='warn') return item.level===activeLogFilter; return item.category===activeLogFilter; }
+function renderLogs(){
+    const wasNearBottom=logElement.scrollHeight-logElement.scrollTop-logElement.clientHeight<40; for(const item of pendingLogs){ logHistory.push(item); if(logHistory.length>LOG_HISTORY_LIMIT) logHistory.shift(); } pendingLogs=[];
+    logElement.querySelectorAll('[data-log-row]').forEach(node=>node.remove()); let visible=0; const fragment=document.createDocumentFragment();
+    for(const item of logHistory){ if(!matchesLog(item)) continue; const row=document.createElement('div'); row.dataset.logRow='1'; row.className=item.className; row.textContent=`[${item.time}] ${item.message}`; fragment.appendChild(row); visible++; }
+    logElement.appendChild(fragment); logEmpty.style.display=visible?'none':'block'; updateLogCounts(); if(wasNearBottom) logElement.scrollTop=logElement.scrollHeight;
+}
+function updateLogCounts(){
+    const counts={all:logHistory.length,error:0,warn:0,signal:0,combat:0}; for(const item of logHistory){ if(item.level==='error')counts.error++; if(item.level==='warn')counts.warn++; if(item.category==='signal')counts.signal++; if(item.category==='combat')counts.combat++; }
+    document.getElementById('logCountAll').textContent=counts.all; document.getElementById('logCountError').textContent=counts.error; document.getElementById('logCountWarn').textContent=counts.warn; document.getElementById('logCountSignal').textContent=counts.signal; document.getElementById('logCountCombat').textContent=counts.combat;
+}
+function setLogFilter(filter){ activeLogFilter=filter; document.querySelectorAll('.logFilter[data-filter]').forEach(button=>button.classList.toggle('active',button.dataset.filter===filter)); renderLogs(); }
+function clearLogs(){ logHistory.length=0; pendingLogs=[]; renderLogs(); }
+window.setLogFilter=setLogFilter; window.clearLogs=clearLogs;
+
+function shutdown(){
+    if(pageUnloading) return; pageUnloading=true; signalManualClose=true;
+    for(const [id] of peers) sendSignal({type:'leave',to:id});
+    for(const [id] of [...peers]) removePeer(id,'page unload');
+    clearTimeout(signalReconnectTimer); clearTimeout(signalConnectTimeout); clearInterval(signalKeepaliveTimer); try{signalingSocket?.close(1000,'page unload');}catch(_){}
+}
+window.addEventListener('pagehide',shutdown); window.addEventListener('beforeunload',shutdown);
+
+setInterval(tickMovement,STEP_INTERVAL_MS);
+setInterval(tickCombat,100);
+setInterval(renderLogs,150);
+setInterval(updateKda,1000);
+setInterval(()=>document.getElementById('tick').textContent=`TICK ${currentTick()}`,100);
+setInterval(()=>{
+    const descriptor=membershipDescriptor();
+    const localCommittee=validatorsFor({membershipIds:descriptor.membershipIds,membershipHash:descriptor.membershipHash,epochId:descriptor.epochId,playerId:myId,sequence:localSequence+1,previousStateHash:stateHash(getPredictedTail(myId)||confirmedWorld[myId])});
+    document.getElementById('epochStat').textContent=descriptor.epochId;
+    document.getElementById('aoiPeerStat').textContent=`${localAoiPeerIds().length} / ${Math.max(0,descriptor.membershipIds.length-1)}`;
+    document.getElementById('committeeStat').textContent=`${localCommittee.join(',')||myId} · q${Math.floor(localCommittee.length/2)+1}`;
+    document.getElementById('confirmedStat').textContent=confirmedCounter;
+    document.getElementById('tentativeStat').textContent=pendingById.size;
+    document.getElementById('rejectedStat').textContent=rejectedCounter;
+    document.getElementById('stalledStat').textContent=stalledCounter;
+    document.getElementById('membershipMismatchStat').textContent=membershipMismatchCounter;
+    document.getElementById('trafficStat').textContent=`${(networkMetrics.txBytes/1024).toFixed(1)} / ${(networkMetrics.rxBytes/1024).toFixed(1)} KB`;
+    document.getElementById('messageRateStat').textContent=`${networkMetrics.txRate} / ${networkMetrics.rxRate}`;
+    const avg=commitLatencySamples.length?commitLatencySamples.reduce((a,b)=>a+b,0)/commitLatencySamples.length:null;
+    document.getElementById('commitLatencyStat').textContent=avg==null?'-':`${avg.toFixed(0)} ms`;
+    document.getElementById('checkpointStat').textContent=`${networkMetrics.lastCheckpointPlayers} players`;
+},500);
+setInterval(()=>{ if(signalingSocket?.readyState===WebSocket.OPEN) sendSignal({type:'announce'}); },3000);
+setInterval(()=>{ networkMetrics.txRate=networkMetrics.txMessagesWindow; networkMetrics.rxRate=networkMetrics.rxMessagesWindow; networkMetrics.txByteRate=networkMetrics.txBytesWindow; networkMetrics.rxByteRate=networkMetrics.rxBytesWindow; networkMetrics.txMessagesWindow=networkMetrics.rxMessagesWindow=networkMetrics.txBytesWindow=networkMetrics.rxBytesWindow=0; },1000);
+
+log('t-sys',`local peer boot id=${myId} protocol=${PROTOCOL} room=${ROOM_ID} aoi=${AOI_RADIUS} committee=${COMMITTEE_SIZE}`);
 </script>
 </body>
 </html>
