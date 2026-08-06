@@ -33,8 +33,17 @@ button,input{font-family:var(--mono);font-size:11px}
 button{cursor:pointer;border-radius:3px;padding:5px 7px}
 .btnPrimary{background:var(--accent);border:none;color:#04120a;font-weight:600}.btnGhost{background:transparent;border:1px solid var(--line);color:var(--dim)}
 .controls{display:flex;gap:6px;margin-bottom:8px}.controls input{width:70px;background:var(--bg);border:1px solid var(--line);color:var(--fg);padding:4px}
-#log{flex:1;overflow:auto;font-size:10.5px;padding:10px 14px;line-height:1.55}
-#log div{margin-bottom:2px;white-space:pre-wrap;word-break:break-word}.t-sig{color:var(--warn)}.t-cmd{color:var(--accent)}.t-audit{color:var(--audit)}.t-err{color:var(--err)}.t-sys{color:var(--dim)}
+#log{flex:1;overflow:auto;font-size:10.5px;padding:8px 14px 10px;line-height:1.55}
+#log div{margin-bottom:2px;white-space:pre-wrap;word-break:break-word}.t-sig{color:var(--warn)}.t-cmd{color:var(--accent)}.t-audit{color:var(--audit)}.t-warn{color:var(--warn)}.t-err{color:var(--err)}.t-sys{color:var(--dim)}
+.logToolbar{display:flex;flex-wrap:wrap;gap:4px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.logFilter{background:transparent;border:1px solid var(--line);color:var(--dim);padding:3px 6px;font-size:9.5px}
+.logFilter:hover{color:var(--fg);border-color:var(--dim)}
+.logFilter.active{color:var(--fg);border-color:var(--accent);background:rgba(61,220,151,.08)}
+.logFilter[data-filter="error"].active{border-color:var(--err);background:rgba(239,91,110,.08)}
+.logFilter[data-filter="warn"].active{border-color:var(--warn);background:rgba(242,169,59,.08)}
+.logFilter .count{opacity:.75;margin-left:2px}
+.logToolbar .spacer{flex:1}
+#logEmpty{display:none;color:var(--dim);padding:12px 0;text-align:center}
 .legend{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10px;color:var(--dim)}
 .badge{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-radius:9px;font-size:9px;margin-left:4px}
 #signalState[data-state="open"]{color:var(--accent)}
@@ -98,7 +107,16 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
         </div>
         <div class="block" style="flex:1;display:flex;flex-direction:column;min-height:0;border-bottom:none">
             <h2>Event / Validation Log</h2>
-            <div id="log"></div>
+            <div class="logToolbar" id="logToolbar">
+                <button class="logFilter active" data-filter="all" onclick="setLogFilter('all')">전체 <span class="count" id="logCountAll">0</span></button>
+                <button class="logFilter" data-filter="error" onclick="setLogFilter('error')">오류 <span class="count" id="logCountError">0</span></button>
+                <button class="logFilter" data-filter="warn" onclick="setLogFilter('warn')">경고 <span class="count" id="logCountWarn">0</span></button>
+                <button class="logFilter" data-filter="signal" onclick="setLogFilter('signal')">시그널 <span class="count" id="logCountSignal">0</span></button>
+                <button class="logFilter" data-filter="command" onclick="setLogFilter('command')">명령 <span class="count" id="logCountCommand">0</span></button>
+                <span class="spacer"></span>
+                <button class="logFilter" onclick="clearLogs()">지우기</button>
+            </div>
+            <div id="log"><div id="logEmpty">선택한 조건의 로그가 없습니다.</div></div>
         </div>
     </aside>
 </main>
@@ -224,6 +242,9 @@ let duplicateCounter = 0;
 let invalidCounter = 0;
 let lastLocalCommand = null;
 let pendingLogs = [];
+const logHistory = [];
+const LOG_HISTORY_LIMIT = 1000;
+let activeLogFilter = 'all';
 
 initializePlayer(myId, 200 + Math.random() * 300, 150 + Math.random() * 200, myColor);
 refreshMembership('boot');
@@ -420,7 +441,7 @@ function makeShootCommand(dirX, dirY) {
     for (const playerId of membership.membershipIds) {
         const state = playerId === myId ? shooter : confirmedWorld[playerId];
         if (!state) {
-            log('t-err', `shoot blocked: confirmed checkpoint missing player=${playerId}`);
+            log('t-warn', `shoot blocked: confirmed checkpoint missing player=${playerId}`);
             return null;
         }
         const item = {
@@ -1128,7 +1149,7 @@ function receiveCommand(remoteId, command) {
     const validationError = validateCommandEnvelope(remoteId, command);
     if (validationError) {
         invalidCounter++;
-        log('t-err', `command rejected before audit: ${validationError}`);
+        log('t-warn', `command rejected before audit: ${validationError}`);
         return;
     }
     acceptTentativeCommand(command, true);
@@ -1176,7 +1197,7 @@ function acceptTentativeCommand(command, remote) {
     }
     if (command.sequence < expectedSequence) {
         invalidCounter++;
-        log('t-err', `sequence stale expected=${expectedSequence} got=${command.sequence}`);
+        log('t-warn', `sequence stale expected=${expectedSequence} got=${command.sequence}`);
         return;
     }
 
@@ -1189,12 +1210,12 @@ function acceptTentativeCommand(command, remote) {
 
     if (command.tick < previousState.tick) {
         invalidCounter++;
-        log('t-err', `tick regression previous=${previousState.tick} got=${command.tick}`);
+        log('t-warn', `tick regression previous=${previousState.tick} got=${command.tick}`);
         return;
     }
     if (stateHash(previousState) !== command.previousStateHash) {
         invalidCounter++;
-        log('t-err', `previous state hash mismatch id=${command.commandId}`);
+        log('t-warn', `previous state hash mismatch id=${command.commandId}`);
         return;
     }
 
@@ -1264,7 +1285,7 @@ function markPendingStalled(commandId) {
     pending.stalled = true;
     const accepted = [...pending.receipts.values()].filter(receipt => receipt.accepted).length;
     const rejected = [...pending.receipts.values()].filter(receipt => !receipt.accepted).length;
-    log('t-err', `STALLED id=${commandId} receipts=+${accepted}/-${rejected} quorum=${quorumFor(pending.command)} (timeout is not final rejection)`);
+    log('t-warn', `STALLED id=${commandId} receipts=+${accepted}/-${rejected} quorum=${quorumFor(pending.command)} (timeout is not final rejection)`);
 }
 
 function validateShootCheckpoint(command, pending) {
@@ -1424,7 +1445,7 @@ function applyReceiptToPending(remoteId, receipt, pending) {
 
     if (!validators.includes(remoteId)) {
         invalidCounter++;
-        log('t-err', `unauthorized receipt validator=${remoteId} allowed=${validators.join(',')}`);
+        log('t-warn', `unauthorized receipt validator=${remoteId} allowed=${validators.join(',')}`);
         return;
     }
     if (receipt.commandHash !== pending.commandHash
@@ -1432,7 +1453,7 @@ function applyReceiptToPending(remoteId, receipt, pending) {
         || receipt.sequence !== command.sequence
         || receipt.playerId !== command.playerId) {
         invalidCounter++;
-        log('t-err', `receipt binding mismatch validator=${remoteId} command=${command.commandId}`);
+        log('t-warn', `receipt binding mismatch validator=${remoteId} command=${command.commandId}`);
         return;
     }
 
@@ -1534,7 +1555,7 @@ function finalizeRejectedPending(pending, reason) {
     removePending(command);
     rejectedCounter++;
     hitFlashes[command.playerId] = performance.now() + 350;
-    log('t-err', `REJECTED seq=${command.sequence} id=${command.commandId} reason=${reason}`);
+    log('t-warn', `REJECTED seq=${command.sequence} id=${command.commandId} reason=${reason}`);
 
     rejectDependentCommands(command.playerId, command.sequence);
 
@@ -1555,7 +1576,7 @@ function rejectDependentCommands(playerId, rejectedSequence) {
             pendingByPlayerSequence.get(playerId)?.delete(dependent.command.sequence);
             rejectedCommandIds.add(commandId);
             rejectedCounter++;
-            log('t-err', `dependent rollback seq=${dependent.command.sequence} id=${commandId}`);
+            log('t-warn', `dependent rollback seq=${dependent.command.sequence} id=${commandId}`);
         }
     }
     pendingOrderByPlayer.set(playerId, (pendingOrderByPlayer.get(playerId) || []).filter(id => pendingById.has(id)));
@@ -1669,13 +1690,13 @@ function receiveSnapshot(remoteId, snapshot) {
         || snapshot.clockTick < 0
         || state.tick > snapshot.clockTick + 6) {
         invalidCounter++;
-        log('t-err', `snapshot clock invalid from=${remoteId} stateTick=${state.tick} clockTick=${snapshot.clockTick}`);
+        log('t-warn', `snapshot clock invalid from=${remoteId} stateTick=${state.tick} clockTick=${snapshot.clockTick}`);
         return;
     }
 
     if (snapshot.stateHash !== stateHash(state)) {
         invalidCounter++;
-        log('t-err', `snapshot hash mismatch from=${remoteId}`);
+        log('t-warn', `snapshot hash mismatch from=${remoteId}`);
         return;
     }
 
@@ -1694,13 +1715,13 @@ function receiveSnapshot(remoteId, snapshot) {
         if (state.sequence === localSequence) {
             if (stateHash(confirmedWorld[remoteId]) !== snapshot.stateHash) {
                 invalidCounter++;
-                log('t-err', `snapshot fork detected player=${remoteId} seq=${state.sequence}`);
+                log('t-warn', `snapshot fork detected player=${remoteId} seq=${state.sequence}`);
             }
             return;
         }
         if (state.sequence - localSequence > MAX_SNAPSHOT_SEQUENCE_JUMP) {
             invalidCounter++;
-            log('t-err', `snapshot sequence jump rejected player=${remoteId} local=${localSequence} got=${state.sequence}`);
+            log('t-warn', `snapshot sequence jump rejected player=${remoteId} local=${localSequence} got=${state.sequence}`);
             return;
         }
         if (getPendingCount(remoteId) > 0) {
@@ -2133,28 +2154,116 @@ function updatePeerList() {
 }
 
 const logElement = document.getElementById('log');
+const logEmptyElement = document.getElementById('logEmpty');
+
+function classifyLog(className, message) {
+    let level = 'info';
+    let category = 'system';
+    if (className === 't-err') level = 'error';
+    else if (className === 't-warn') level = 'warn';
+    else if (className === 't-cmd') { level = 'debug'; category = 'command'; }
+    else if (className === 't-audit') category = 'command';
+    else if (className === 't-sig' || message.startsWith('[SIGNAL]')) category = 'signal';
+    return { level, category };
+}
 
 function log(className, message) {
+    const meta = classifyLog(className, message);
     pendingLogs.push({
         className,
         message,
+        level: meta.level,
+        category: meta.category,
         time: new Date().toLocaleTimeString('ko-KR', { hour12: false })
     });
 }
 
+function logMatchesFilter(item, filter = activeLogFilter) {
+    if (filter === 'all') return true;
+    if (filter === 'error' || filter === 'warn') return item.level === filter;
+    return item.category === filter;
+}
+
+function createLogLine(item) {
+    const line = document.createElement('div');
+    line.className = item.className;
+    line.dataset.level = item.level;
+    line.dataset.category = item.category;
+    line.textContent = `[${item.time}] ${item.message}`;
+    return line;
+}
+
+function updateLogCounts() {
+    const counts = { all: logHistory.length, error: 0, warn: 0, signal: 0, command: 0 };
+    for (const item of logHistory) {
+        if (item.level === 'error') counts.error++;
+        if (item.level === 'warn') counts.warn++;
+        if (item.category === 'signal') counts.signal++;
+        if (item.category === 'command') counts.command++;
+    }
+    document.getElementById('logCountAll').textContent = counts.all;
+    document.getElementById('logCountError').textContent = counts.error;
+    document.getElementById('logCountWarn').textContent = counts.warn;
+    document.getElementById('logCountSignal').textContent = counts.signal;
+    document.getElementById('logCountCommand').textContent = counts.command;
+}
+
+function renderLogHistory() {
+    const fragment = document.createDocumentFragment();
+    let visibleCount = 0;
+    for (const item of logHistory) {
+        if (!logMatchesFilter(item)) continue;
+        fragment.appendChild(createLogLine(item));
+        visibleCount++;
+    }
+    logElement.replaceChildren(fragment);
+    logEmptyElement.style.display = visibleCount ? 'none' : 'block';
+    if (!visibleCount) logElement.appendChild(logEmptyElement);
+    logElement.scrollTop = logElement.scrollHeight;
+}
+
+function setLogFilter(filter) {
+    const allowed = new Set(['all', 'error', 'warn', 'signal', 'command']);
+    activeLogFilter = allowed.has(filter) ? filter : 'all';
+    for (const button of document.querySelectorAll('#logToolbar [data-filter]')) {
+        button.classList.toggle('active', button.dataset.filter === activeLogFilter);
+    }
+    renderLogHistory();
+}
+
+function clearLogs() {
+    pendingLogs = [];
+    logHistory.length = 0;
+    updateLogCounts();
+    renderLogHistory();
+}
+
+window.setLogFilter = setLogFilter;
+window.clearLogs = clearLogs;
+
 function flushLogs() {
     if (!pendingLogs.length) return;
-    const fragment = document.createDocumentFragment();
-    for (const item of pendingLogs) {
-        const line = document.createElement('div');
-        line.className = item.className;
-        line.textContent = `[${item.time}] ${item.message}`;
-        fragment.appendChild(line);
+    const wasNearBottom = logElement.scrollHeight - logElement.scrollTop - logElement.clientHeight < 24;
+    for (const item of pendingLogs) logHistory.push(item);
+    if (logHistory.length > LOG_HISTORY_LIMIT) {
+        logHistory.splice(0, logHistory.length - LOG_HISTORY_LIMIT);
+        renderLogHistory();
+    } else {
+        const fragment = document.createDocumentFragment();
+        for (const item of pendingLogs) {
+            if (logMatchesFilter(item)) fragment.appendChild(createLogLine(item));
+        }
+        if (fragment.childNodes.length) {
+            logEmptyElement.remove();
+            logElement.appendChild(fragment);
+        }
     }
-    logElement.appendChild(fragment);
-    while (logElement.children.length > 350) logElement.removeChild(logElement.firstChild);
-    logElement.scrollTop = logElement.scrollHeight;
     pendingLogs = [];
+    updateLogCounts();
+    const hasVisible = logHistory.some(item => logMatchesFilter(item));
+    logEmptyElement.style.display = hasVisible ? 'none' : 'block';
+    if (!hasVisible && !logEmptyElement.isConnected) logElement.appendChild(logEmptyElement);
+    if (wasNearBottom) logElement.scrollTop = logElement.scrollHeight;
 }
 
 function pruneEphemeralBuffers() {
@@ -2169,7 +2278,7 @@ function pruneEphemeralBuffers() {
         if (now - item.receivedAt > ORPHAN_RECEIPT_TTL_MS) {
             deferredCommands.delete(commandId);
             invalidCounter++;
-            log('t-err', `deferred command expired id=${commandId}`);
+            log('t-warn', `deferred command expired id=${commandId}`);
         }
     }
 }
