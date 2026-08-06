@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Distributed World Runtime — Hardened P2P Demo v4</title>
+<title>Distributed World Runtime — Hardened P2P Demo v5</title>
 <style>
 :root{
     --bg:#0a0e12;--panel:#10161c;--line:#1c2733;--grid:#141b22;
@@ -106,7 +106,7 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
 'use strict';
 
 /*
- * Hardened P2P demo v4
+ * Hardened P2P demo v5
  *
  * 이 파일은 "서버 없는 P2P가 완전한 권위 서버를 대체한다"고 주장하지 않는다.
  * 대신 v2에서 실제로 깨지던 항목을 코드 수준에서 막는다.
@@ -130,14 +130,14 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
  *   authoritative relay/server 또는 별도 consensus 계층이 필요하다.
  */
 
-const PROTOCOL = 5;
+const PROTOCOL = 6;
 const SIGNAL_PROTOCOL = 1;
 const URL_PARAMS = new URLSearchParams(location.search);
 const RAW_SIGNAL_URL = (URL_PARAMS.get('signal') || '').trim();
 const ROOM_ID = sanitizeRoomId(URL_PARAMS.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl(RAW_SIGNAL_URL);
 const SIGNAL_MODE = RAW_SIGNAL_URL ? 'websocket' : 'broadcast-channel';
-const LOCAL_SIGNAL_CHANNEL_NAME = `mmo-p2p-signal-v5:${ROOM_ID}`;
+const LOCAL_SIGNAL_CHANNEL_NAME = `mmo-p2p-signal-v6:${ROOM_ID}`;
 const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
 const SIGNAL_CONNECT_TIMEOUT_MS = 45000;
@@ -877,9 +877,9 @@ async function createPeer(remoteId, isOfferer, remoteSdp) {
         clearTimeout(disconnectTimers.get(remoteId));
 
         if (pc.connectionState === 'connected') {
-            log('t-sig', `WebRTC connected ↔ ${remoteId}`);
-            refreshMembership('peer connected');
-            sendSnapshot(remoteId);
+            // RTCPeerConnection만 연결됐을 때는 DataChannel이 아직 열리지 않았을 수 있다.
+            // 실제 명령 교환 가능한 membership은 dc.onopen에서만 갱신한다.
+            log('t-sig', `WebRTC transport connected ↔ ${remoteId} (waiting data channel)`);
         } else if (pc.connectionState === 'disconnected') {
             const timer = setTimeout(() => {
                 const current = peers.get(remoteId);
@@ -910,7 +910,7 @@ async function createPeer(remoteId, isOfferer, remoteSdp) {
     }
 
     if (isOfferer) {
-        bindChannel(pc.createDataChannel('world-v5', { ordered: true }));
+        bindChannel(pc.createDataChannel('world-v6', { ordered: true }));
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         sendSignal({ type: 'offer', to: remoteId, sdp: offer });
@@ -1188,20 +1188,23 @@ function runAudit(command) {
     let reason = '';
     let computed = null;
 
+    const tickCheck = checkCommandTick(command.playerId, command.tick, pending.previousState.tick);
+
     if (!pending.membershipMatchedAtReceive) {
         reason = `membership mismatch local=${stableHash(currentMembershipIds())} command=${command.membershipHash}`;
+    } else if (!tickCheck.ok) {
+        reason = `command tick invalid: ${tickCheck.reason}`;
+        computed = { tickWindowMax: tickCheck.maxTick };
     } else if (command.type === 'move') {
         computed = computeMove(pending.previousState, command.dx, command.dy, command.tick);
-        const tickCheck = checkCommandTick(command.playerId, command.tick, pending.previousState.tick);
         computed.tickWindowMax = tickCheck.maxTick;
         accepted = !computed.speedViolation
-            && tickCheck.ok
             && computed.x === command.claimedX
             && computed.y === command.claimedY
             && stateHash(pending.previousState) === command.previousStateHash;
         reason = accepted
             ? `deterministic move verified max=${computed.maxStep}`
-            : `move invalid distance=${computed.distance} max=${computed.maxStep} tickDelta=${computed.tickDelta} tick=${tickCheck.reason || 'ok'}`;
+            : `move invalid distance=${computed.distance} max=${computed.maxStep} tickDelta=${computed.tickDelta}`;
     } else {
         const length = Math.hypot(command.dirX, command.dirY);
         const normalized = Math.abs(length - 1) < 0.02;
@@ -1392,7 +1395,8 @@ function commitAcceptedPending(pending) {
 
     visibleWorld[command.playerId] = { ...confirmedWorld[command.playerId] };
     confirmedSeq.set(command.playerId, command.sequence);
-    tickAnchors.set(command.playerId, { remoteTick: command.tick, localTime: performance.now() });
+    // 원격 시계 기준점은 snapshot.clockTick으로 유지한다. 명령의 state tick으로
+    // 덮어쓰면 감사/네트워크 지연만큼 기준 시계가 뒤처져 다음 정상 명령을 거절한다.
     removePending(command);
     confirmedCounter++;
 
@@ -1517,6 +1521,9 @@ function sendSnapshot(remoteId) {
             tick: state.tick,
             sequence: confirmedSeq.get(myId) || 0
         },
+        // state.tick은 마지막 확정 명령의 시각이다. 오래 정지한 플레이어의
+        // 현재 원격 시계와 같지 않으므로 clockTick을 별도로 보낸다.
+        clockTick: currentTick(),
         stateHash: stateHash({ ...state, sequence: confirmedSeq.get(myId) || 0 }),
         membershipHint: membershipDescriptor()
     };
@@ -1535,8 +1542,12 @@ function receiveSnapshot(remoteId, snapshot) {
         || !Number.isSafeInteger(state.sequence)
         || state.sequence < 0
         || !Number.isSafeInteger(state.tick)
-        || state.tick < 0) {
+        || state.tick < 0
+        || !Number.isSafeInteger(snapshot.clockTick)
+        || snapshot.clockTick < 0
+        || state.tick > snapshot.clockTick + 6) {
         invalidCounter++;
+        log('t-err', `snapshot clock invalid from=${remoteId} stateTick=${state.tick} clockTick=${snapshot.clockTick}`);
         return;
     }
 
@@ -1544,6 +1555,15 @@ function receiveSnapshot(remoteId, snapshot) {
         invalidCounter++;
         log('t-err', `snapshot hash mismatch from=${remoteId}`);
         return;
+    }
+
+    // 위치 state.tick이 아니라 송신자의 현재 clockTick을 시간 기준점으로 쓴다.
+    // 예: 접속 후 14초 동안 정지했다면 state.tick=0, clockTick≈420일 수 있다.
+    // 이 둘을 혼동하면 첫 정상 이동을 미래 tick 치트로 오판한다.
+    const now = performance.now();
+    const existingAnchor = tickAnchors.get(remoteId);
+    if (!existingAnchor || snapshot.clockTick >= existingAnchor.remoteTick) {
+        tickAnchors.set(remoteId, { remoteTick: snapshot.clockTick, localTime: now });
     }
 
     const localSequence = confirmedSeq.get(remoteId);
@@ -1577,9 +1597,8 @@ function receiveSnapshot(remoteId, snapshot) {
     };
     visibleWorld[remoteId] = { ...confirmedWorld[remoteId] };
     confirmedSeq.set(remoteId, state.sequence);
-    tickAnchors.set(remoteId, { remoteTick: state.tick, localTime: performance.now() });
     recordHistory(remoteId, state.x, state.y, state.sequence, state.tick);
-    log('t-sys', `self-owned snapshot merged from=${remoteId} seq=${state.sequence}`);
+    log('t-sys', `self-owned snapshot merged from=${remoteId} seq=${state.sequence} stateTick=${state.tick} clockTick=${snapshot.clockTick}`);
     tryDeferredCommands(remoteId);
 }
 
