@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Distributed World Runtime — Hardened P2P Demo</title>
+<title>Distributed World Runtime — Hardened P2P Demo v3</title>
 <style>
 :root{
     --bg:#0a0e12;--panel:#10161c;--line:#1c2733;--grid:#141b22;
@@ -43,13 +43,13 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
 <body>
 <header>
     <h1>Distributed World Runtime</h1>
-    <span class="sub">WebRTC P2P · channel-bound identity · sequenced commands · tentative/confirmed state · validator receipts</span>
+    <span class="sub">WebRTC P2P · in-order commit · quorum receipts · self-owned snapshots · fixed shoot checkpoints</span>
     <span id="tick">TICK 0</span>
 </header>
 <main>
     <div id="stage">
         <canvas id="canvas"></canvas>
-        <div id="hint">좌클릭: 사격 · 우클릭: 목적지 이동 · 방향키: 즉시 이동 · 주황 외곽선은 감사 대기 상태 · 콘솔 cheatTeleport(), spoofIdentity(), replayLastCommand()로 방어 확인</div>
+        <div id="hint">좌클릭: 사격 · 우클릭: 목적지 이동 · 방향키: 즉시 이동 · 주황=쿼럼 대기 · 빨강=stalled · 콘솔 cheatTeleport(), spoofIdentity(), replayLastCommand(), forgeSnapshot()</div>
     </div>
     <aside>
         <div class="block">
@@ -83,7 +83,7 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
         </div>
         <div class="block" style="padding-bottom:8px">
             <h2>Legend</h2>
-            <div class="legend"><span>solid: confirmed</span><span>orange ring: tentative</span><span>white ring: local</span><span>red flash: hit/reject</span></div>
+            <div class="legend"><span>solid: confirmed</span><span>orange ring: tentative</span><span>white ring: local</span><span>red ring: stalled</span></div>
         </div>
         <div class="block" style="flex:1;display:flex;flex-direction:column;min-height:0;border-bottom:none">
             <h2>Event / Validation Log</h2>
@@ -94,34 +94,77 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
 <script>
 'use strict';
 
-const CHANNEL = new BroadcastChannel('mmo-p2p-signal-v4');
+/*
+ * Hardened P2P demo v3
+ *
+ * 이 파일은 "서버 없는 P2P가 완전한 권위 서버를 대체한다"고 주장하지 않는다.
+ * 대신 v2에서 실제로 깨지던 항목을 코드 수준에서 막는다.
+ *
+ * 1. receipt 도착 순서와 commit 순서를 분리한다.
+ * 2. receipt가 command보다 먼저 와도 보관한다.
+ * 3. 단일 무작위 validator 대신 membership에 포함된 validator quorum을 사용한다.
+ * 4. timeout은 로컬 최종 거절이 아니라 stalled 상태다.
+ * 5. snapshot은 송신자 자신의 상태만 전달한다.
+ * 6. client tick advance에 상한을 둔다.
+ * 7. shoot는 명령에 고정된 confirmed checkpoint를 사용한다.
+ * 8. move뿐 아니라 shoot commit도 player sequence를 전진시킨다.
+ *
+ * 남는 한계:
+ * - 브라우저 클라이언트만으로 구성된 P2P는 Sybil, 담합, 수정 클라이언트,
+ *   신규 참가자 bootstrap 거짓말을 완전히 해결하지 못한다.
+ * - production에서는 서명된 identity, 고정 membership epoch, quorum certificate,
+ *   authoritative relay/server 또는 별도 consensus 계층이 필요하다.
+ */
+
+const PROTOCOL = 5;
+const CHANNEL = new BroadcastChannel('mmo-p2p-signal-v5');
 const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
 const TICK_MS = 1000 / 30;
-const MAX_STEP = 50;
+const BASE_MAX_STEP = 50;
+const STEP_INTERVAL_MS = 90;
+const STEP_JITTER_ALLOWANCE = 1.35;
+const STEP_EPSILON = 0.75;
+const MAX_TICK_ADVANCE = 120; // 약 4초. 송신자가 임의의 미래 tick으로 이동량을 무한 증폭하지 못하게 한다.
 const MAX_RANGE = 900;
 const HIT_RADIUS = 14;
-const AUDIT_TIMEOUT_MS = 900;
+const AUDIT_STALL_MS = 1200;
+const ORPHAN_RECEIPT_TTL_MS = 8000;
+const MAX_ORPHAN_COMMANDS = 512;
+const MAX_SEEN_COMMANDS = 10000;
+const MAX_SNAPSHOT_SEQUENCE_JUMP = 10000;
 const MOVE_SPEED = 220;
 const MOVE_MAX_DURATION = 2500;
 const MOVE_MIN_DURATION = 250;
-// RENDER_DELAY_MS(구 스냅샷 보간 버퍼)는 moveIntent 기반 세그먼트 직접 평가로 대체되어 더 이상 쓰이지 않음
-const COLORS = ['#3ddc97','#f2a93b','#7aa5ff','#ef5b6e','#c77dff','#4fd6d6','#e0c341'];
+const DISCONNECT_GRACE_MS = 5000;
+const COLORS = ['#3ddc97', '#f2a93b', '#7aa5ff', '#ef5b6e', '#c77dff', '#4fd6d6', '#e0c341'];
 
-const myId = crypto.randomUUID().slice(0, 8);
+const myId = randomId(8);
 const myColor = colorFor(myId);
 const roomEpoch = performance.now();
 
 document.getElementById('peerId').textContent = myId;
 
 const peers = new Map();
+const prePeerIce = new Map();
+const disconnectTimers = new Map();
+
 const confirmedWorld = Object.create(null);
 const visibleWorld = Object.create(null);
 const confirmedSeq = new Map();
+const tickAnchors = new Map();
+
 const pendingById = new Map();
 const pendingOrderByPlayer = new Map();
+const pendingByPlayerSequence = new Map();
+const deferredCommands = new Map();
+
 const seenCommandIds = new Set();
+const seenCommandQueue = [];
 const rejectedCommandIds = new Set();
+const orphanReceipts = new Map();
 const validatorReceipts = new Map();
+
 const posHistory = Object.create(null);
 const moveState = Object.create(null);
 const bullets = [];
@@ -130,16 +173,17 @@ const hits = Object.create(null);
 const bots = new Set();
 
 let localSequence = 0;
-let membershipVersion = 0;
-let validatorPool = [myId];
+let membershipRevision = 0;
 let cmdCounter = 0;
 let confirmedCounter = 0;
 let rejectedCounter = 0;
 let duplicateCounter = 0;
 let invalidCounter = 0;
 let lastLocalCommand = null;
+let pendingLogs = [];
 
 initializePlayer(myId, 200 + Math.random() * 300, 150 + Math.random() * 200, myColor);
+refreshMembership('boot');
 
 function currentTick() {
     return Math.floor((performance.now() - roomEpoch) / TICK_MS);
@@ -149,11 +193,20 @@ function colorFor(id) {
     return COLORS[[...id].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % COLORS.length];
 }
 
-function initializePlayer(playerId, x, y, color = colorFor(playerId)) {
-    confirmedWorld[playerId] = { x, y, color, tick: currentTick(), sequence: 0 };
-    visibleWorld[playerId] = { ...confirmedWorld[playerId], tentative: false };
-    confirmedSeq.set(playerId, 0);
-    recordHistory(playerId, x, y, 0, currentTick());
+function initializePlayer(playerId, x, y, color = colorFor(playerId), sequence = 0, tick = currentTick()) {
+    const state = {
+        x: round6(x),
+        y: round6(y),
+        color,
+        tick: Number.isSafeInteger(tick) ? tick : 0,
+        sequence: Number.isSafeInteger(sequence) ? sequence : 0,
+        tentative: false
+    };
+    confirmedWorld[playerId] = { ...state };
+    visibleWorld[playerId] = { ...state };
+    confirmedSeq.set(playerId, state.sequence);
+    tickAnchors.set(playerId, { remoteTick: state.tick, localTime: performance.now() });
+    recordHistory(playerId, state.x, state.y, state.sequence, state.tick);
 }
 
 function stableHash(value) {
@@ -170,34 +223,134 @@ function stateHash(state) {
     return stableHash({
         x: round6(state.x),
         y: round6(state.y),
-        sequence: state.sequence
+        sequence: state.sequence,
+        tick: state.tick
     });
+}
+
+function commandHash(command) {
+    return stableHash(command);
 }
 
 function round6(value) {
     return Math.round(value * 1e6) / 1e6;
 }
 
-function createCommandId(playerId, sequence) {
-    return `${playerId}:${sequence}:${crypto.randomUUID().slice(0, 8)}`;
+function randomId(length = 12) {
+    if (typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID().replaceAll('-', '').slice(0, length);
+    }
+    const bytes = new Uint8Array(Math.ceil(length / 2));
+    crypto.getRandomValues(bytes);
+    return [...bytes].map(value => value.toString(16).padStart(2, '0')).join('').slice(0, length);
 }
 
-function computeMove(prevState, dx, dy) {
-    const clampedDx = Math.max(-MAX_STEP, Math.min(MAX_STEP, dx));
-    const clampedDy = Math.max(-MAX_STEP, Math.min(MAX_STEP, dy));
+function createCommandId(playerId, sequence) {
+    return `${playerId}:${sequence}:${randomId(12)}`;
+}
+
+
+function currentMembershipIds() {
+    const ids = [myId];
+    for (const [peerId, peer] of peers) {
+        if (peer.dc?.readyState === 'open') ids.push(peerId);
+    }
+    return [...new Set(ids)].sort();
+}
+
+function membershipDescriptor() {
+    const ids = currentMembershipIds();
     return {
-        x: round6(prevState.x + clampedDx),
-        y: round6(prevState.y + clampedDy),
-        speedViolation: dx !== clampedDx || dy !== clampedDy
+        membershipIds: ids,
+        membershipHash: stableHash(ids)
     };
+}
+
+function validatorsFor(command) {
+    const validators = command.membershipIds.filter(id => id !== command.playerId);
+    return validators.length ? validators : [command.playerId];
+}
+
+function quorumFor(command) {
+    const validators = validatorsFor(command);
+    return Math.floor(validators.length / 2) + 1;
+}
+
+function localMembershipMatches(command) {
+    return stableHash(currentMembershipIds()) === command.membershipHash;
+}
+
+function refreshMembership(reason = '') {
+    membershipRevision++;
+    const descriptor = membershipDescriptor();
+    document.getElementById('membershipVersion').textContent = `${membershipRevision} / ${descriptor.membershipHash}`;
+    if (reason) log('t-sys', `membership rev=${membershipRevision} hash=${descriptor.membershipHash} members=${descriptor.membershipIds.join(',')} reason=${reason}`);
+}
+
+function allowedStepForTicks(previousTick, commandTick) {
+    const rawDelta = commandTick - previousTick;
+    const elapsedTicks = Math.max(1, Math.min(MAX_TICK_ADVANCE, rawDelta));
+    const nominalTicksPerStep = STEP_INTERVAL_MS / TICK_MS;
+    const elapsedSteps = elapsedTicks / nominalTicksPerStep;
+    return BASE_MAX_STEP * Math.max(1, elapsedSteps) * STEP_JITTER_ALLOWANCE + STEP_EPSILON;
+}
+
+function computeMove(prevState, dx, dy, commandTick = currentTick()) {
+    const previousTick = Number.isSafeInteger(prevState.tick) ? prevState.tick : commandTick;
+    const tickDelta = commandTick - previousTick;
+    const maxStep = allowedStepForTicks(previousTick, commandTick);
+    const distance = Math.hypot(dx, dy);
+    const scale = distance > maxStep && distance > 0 ? maxStep / distance : 1;
+    const appliedDx = dx * scale;
+    const appliedDy = dy * scale;
+    return {
+        x: round6(prevState.x + appliedDx),
+        y: round6(prevState.y + appliedDy),
+        speedViolation: distance > maxStep + 1e-9,
+        tickViolation: tickDelta < 0,
+        tickDelta,
+        maxStep: round6(maxStep),
+        distance: round6(distance)
+    };
+}
+
+
+function checkCommandTick(playerId, commandTick, previousTick) {
+    if (commandTick < previousTick) {
+        return { ok: false, reason: `tick regression previous=${previousTick} got=${commandTick}` };
+    }
+
+    if (playerId === myId) {
+        const maxTick = currentTick() + 6;
+        return commandTick <= maxTick
+            ? { ok: true, maxTick }
+            : { ok: false, maxTick, reason: `future local tick got=${commandTick} max=${maxTick}` };
+    }
+
+    const anchor = tickAnchors.get(playerId);
+    if (!anchor) {
+        const maxTick = previousTick + MAX_TICK_ADVANCE;
+        return commandTick <= maxTick
+            ? { ok: true, maxTick }
+            : { ok: false, maxTick, reason: `unanchored future tick got=${commandTick} max=${maxTick}` };
+    }
+
+    const elapsedTicks = Math.max(0, Math.floor((performance.now() - anchor.localTime) / TICK_MS));
+    const maxTick = anchor.remoteTick + elapsedTicks + 12;
+    return commandTick <= maxTick
+        ? { ok: true, maxTick }
+        : { ok: false, maxTick, reason: `future remote tick got=${commandTick} max=${maxTick}` };
 }
 
 function makeMoveCommand(dx, dy) {
     const prev = getPredictedTail(myId);
+    if (!prev) return null;
     const sequence = ++localSequence;
-    const result = computeMove(prev, dx, dy);
+    const tick = currentTick();
+    const result = computeMove(prev, dx, dy, tick);
+    const membership = membershipDescriptor();
     return {
-        protocol: 4,
+        protocol: PROTOCOL,
         type: 'move',
         commandId: createCommandId(myId, sequence),
         playerId: myId,
@@ -207,29 +360,60 @@ function makeMoveCommand(dx, dy) {
         dy: round6(dy),
         claimedX: result.x,
         claimedY: result.y,
-        tick: currentTick(),
-        membershipVersion
+        tick,
+        membershipIds: membership.membershipIds,
+        membershipHash: membership.membershipHash
     };
 }
 
 function makeShootCommand(dirX, dirY) {
-    const shooter = visibleWorld[myId];
+    const shooter = getPredictedTail(myId);
+    if (!shooter) return null;
+
+    const membership = membershipDescriptor();
+    const checkpoint = [];
+    const checkpointWorld = Object.create(null);
+
+    for (const playerId of membership.membershipIds) {
+        const state = playerId === myId ? shooter : confirmedWorld[playerId];
+        if (!state) {
+            log('t-err', `shoot blocked: confirmed checkpoint missing player=${playerId}`);
+            return null;
+        }
+        const item = {
+            playerId,
+            x: round6(state.x),
+            y: round6(state.y),
+            sequence: state.sequence,
+            tick: state.tick
+        };
+        checkpoint.push(item);
+        checkpointWorld[playerId] = item;
+    }
+
+    checkpoint.sort((a, b) => a.playerId.localeCompare(b.playerId));
     const sequence = ++localSequence;
-    const origin = { x: round6(shooter.x), y: round6(shooter.y), sequence: sequence - 1 };
+    const originX = round6(shooter.x);
+    const originY = round6(shooter.y);
+    const tick = currentTick();
+
     return {
-        protocol: 4,
+        protocol: PROTOCOL,
         type: 'shoot',
         commandId: createCommandId(myId, sequence),
         playerId: myId,
         sequence,
-        previousStateHash: stateHash(getPredictedTail(myId)),
-        originX: origin.x,
-        originY: origin.y,
+        previousStateHash: stateHash(shooter),
+        originX,
+        originY,
         dirX: round6(dirX),
         dirY: round6(dirY),
-        tick: currentTick(),
-        membershipVersion,
-        claimedHitId: rayHit(origin.x, origin.y, dirX, dirY, visibleWorld, myId)
+        tick,
+        membershipIds: membership.membershipIds,
+        membershipHash: membership.membershipHash,
+        checkpoint,
+        checkpointHash: stableHash(checkpoint),
+        claimedHitId: rayHit(originX, originY, dirX, dirY, checkpointWorld, myId)
     };
 }
 
@@ -239,11 +423,11 @@ function getPredictedTail(playerId) {
         const pending = pendingById.get(pendingIds[i]);
         if (pending?.nextState) return pending.nextState;
     }
-    return confirmedWorld[playerId];
+    return confirmedWorld[playerId] || null;
 }
 
 function sendSignal(message) {
-    CHANNEL.postMessage({ ...message, from: myId, tick: currentTick() });
+    CHANNEL.postMessage({ ...message, from: myId, signalTick: currentTick() });
 }
 
 function broadcast(message) {
@@ -259,25 +443,64 @@ CHANNEL.onmessage = async event => {
 
     try {
         if (message.type === 'announce') {
-            if (myId < message.from && !peers.has(message.from)) await createPeer(message.from, true);
-            else if (!peers.has(message.from)) peers.set(message.from, { pc: null, dc: null, state: 'awaiting-offer' });
+            if (myId < message.from && !peers.has(message.from)) {
+                await createPeer(message.from, true);
+            } else if (!peers.has(message.from)) {
+                peers.set(message.from, { pc: null, dc: null, state: 'awaiting-offer', remoteId: message.from, pendingIce: [] });
+                updatePeerList();
+            }
         } else if (message.type === 'offer' && message.to === myId) {
             await createPeer(message.from, false, message.sdp);
         } else if (message.type === 'answer' && message.to === myId) {
             const peer = peers.get(message.from);
-            if (peer?.pc) await peer.pc.setRemoteDescription(message.sdp);
+            if (peer?.pc) {
+                await peer.pc.setRemoteDescription(message.sdp);
+                await flushIceQueue(peer);
+            }
         } else if (message.type === 'ice' && message.to === myId) {
             const peer = peers.get(message.from);
-            if (peer?.pc) await peer.pc.addIceCandidate(message.candidate);
+            if (peer?.pc && peer.pc.remoteDescription) {
+                await peer.pc.addIceCandidate(message.candidate);
+            } else if (peer) {
+                peer.pendingIce ||= [];
+                peer.pendingIce.push(message.candidate);
+            } else {
+                const queued = prePeerIce.get(message.from) || [];
+                queued.push(message.candidate);
+                prePeerIce.set(message.from, queued);
+            }
         }
     } catch (error) {
         log('t-err', `signaling error from=${message.from}: ${error.message}`);
     }
 };
 
+async function flushIceQueue(entry) {
+    if (!entry?.pc?.remoteDescription) return;
+    const queued = entry.pendingIce || [];
+    entry.pendingIce = [];
+    for (const candidate of queued) {
+        try {
+            await entry.pc.addIceCandidate(candidate);
+        } catch (error) {
+            log('t-err', `ICE candidate rejected peer=${entry.remoteId}: ${error.message}`);
+        }
+    }
+}
+
 async function createPeer(remoteId, isOfferer, remoteSdp) {
+    const existing = peers.get(remoteId);
+    if (existing?.pc && !['closed', 'failed'].includes(existing.pc.connectionState)) return;
+
     const pc = new RTCPeerConnection(STUN);
-    const entry = { pc, dc: null, state: 'connecting', remoteId };
+    const entry = {
+        pc,
+        dc: null,
+        state: 'connecting',
+        remoteId,
+        pendingIce: [...(existing?.pendingIce || []), ...(prePeerIce.get(remoteId) || [])]
+    };
+    prePeerIce.delete(remoteId);
     peers.set(remoteId, entry);
 
     pc.onicecandidate = event => {
@@ -286,12 +509,21 @@ async function createPeer(remoteId, isOfferer, remoteSdp) {
 
     pc.onconnectionstatechange = () => {
         entry.state = pc.connectionState;
+        clearTimeout(disconnectTimers.get(remoteId));
+
         if (pc.connectionState === 'connected') {
             log('t-sig', `WebRTC connected ↔ ${remoteId}`);
-            refreshMembership();
+            refreshMembership('peer connected');
             sendSnapshot(remoteId);
+        } else if (pc.connectionState === 'disconnected') {
+            const timer = setTimeout(() => {
+                const current = peers.get(remoteId);
+                if (current?.pc?.connectionState === 'disconnected') removePeer(remoteId, 'disconnect timeout');
+            }, DISCONNECT_GRACE_MS);
+            disconnectTimers.set(remoteId, timer);
+        } else if (['failed', 'closed'].includes(pc.connectionState)) {
+            removePeer(remoteId, pc.connectionState);
         }
-        if (['failed', 'closed'].includes(pc.connectionState)) removePeer(remoteId, pc.connectionState);
         updatePeerList();
     };
 
@@ -299,61 +531,61 @@ async function createPeer(remoteId, isOfferer, remoteSdp) {
         entry.dc = dc;
         dc.onopen = () => {
             log('t-sig', `DataChannel open ↔ ${remoteId}`);
-            refreshMembership();
+            refreshMembership('data channel open');
             sendSnapshot(remoteId);
             updatePeerList();
         };
         dc.onmessage = event => handleWireMessage(remoteId, event.data);
-        dc.onclose = () => log('t-sys', `DataChannel close ↔ ${remoteId}`);
+        dc.onclose = () => {
+            log('t-sys', `DataChannel close ↔ ${remoteId}`);
+            refreshMembership('data channel close');
+            updatePeerList();
+        };
+        dc.onerror = event => log('t-err', `DataChannel error ↔ ${remoteId}: ${event?.message || 'unknown'}`);
     }
 
     if (isOfferer) {
-        bindChannel(pc.createDataChannel('world-v4'));
+        bindChannel(pc.createDataChannel('world-v5', { ordered: true }));
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         sendSignal({ type: 'offer', to: remoteId, sdp: offer });
     } else {
         pc.ondatachannel = event => bindChannel(event.channel);
         await pc.setRemoteDescription(remoteSdp);
+        await flushIceQueue(entry);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         sendSignal({ type: 'answer', to: remoteId, sdp: answer });
     }
+
     updatePeerList();
 }
 
 function removePeer(remoteId, reason) {
+    const peer = peers.get(remoteId);
+    if (!peer) return;
+    clearTimeout(disconnectTimers.get(remoteId));
+    disconnectTimers.delete(remoteId);
+    try { peer.dc?.close(); } catch (_) {}
+    try { peer.pc?.close(); } catch (_) {}
     peers.delete(remoteId);
+
     delete visibleWorld[remoteId];
     delete confirmedWorld[remoteId];
     delete posHistory[remoteId];
+    delete moveState[remoteId];
     confirmedSeq.delete(remoteId);
-    refreshMembership();
+    tickAnchors.delete(remoteId);
+
+    refreshMembership('peer removed');
     updatePeerList();
     log('t-err', `peer removed ↔ ${remoteId} (${reason})`);
-}
-
-function refreshMembership() {
-    validatorPool = [...new Set([myId, ...peers.keys()])].sort();
-    membershipVersion++;
-    document.getElementById('membershipVersion').textContent = membershipVersion;
-}
-
-function pickValidator(command) {
-    const index = Math.abs(hashInt(`${command.commandId}:${command.membershipVersion}`)) % validatorPool.length;
-    return validatorPool[index];
-}
-
-function hashInt(text) {
-    let hash = 0;
-    for (let i = 0; i < text.length; i++) hash = Math.imul(hash, 31) + text.charCodeAt(i) | 0;
-    return hash;
 }
 
 function handleWireMessage(remoteId, raw) {
     let message;
     try {
-        if (raw.length > 64 * 1024) throw new Error('message too large');
+        if (typeof raw !== 'string' || raw.length > 64 * 1024) throw new Error('message too large or non-text');
         message = JSON.parse(raw);
     } catch (error) {
         invalidCounter++;
@@ -371,16 +603,42 @@ function handleWireMessage(remoteId, raw) {
     }
 }
 
+function validateMembershipDescriptor(command) {
+    if (!Array.isArray(command.membershipIds) || command.membershipIds.length < 1 || command.membershipIds.length > 128) {
+        return 'invalid membershipIds';
+    }
+    if (!command.membershipIds.every(id => typeof id === 'string' && id.length >= 1 && id.length <= 64)) {
+        return 'invalid membership member';
+    }
+    const normalized = [...new Set(command.membershipIds)].sort();
+    if (normalized.length !== command.membershipIds.length) return 'duplicate membership member';
+    if (normalized.some((id, index) => id !== command.membershipIds[index])) return 'membershipIds must be sorted';
+    if (!normalized.includes(command.playerId)) return 'membership excludes command owner';
+    if (stableHash(normalized) !== command.membershipHash) return 'membership hash mismatch';
+    return null;
+}
+
 function validateCommandEnvelope(remoteId, command) {
-    if (!command || command.protocol !== 4) return 'unsupported protocol';
+    if (!command || command.protocol !== PROTOCOL) return 'unsupported protocol';
     if (!['move', 'shoot'].includes(command.type)) return 'unsupported command';
     if (command.playerId !== remoteId) return `identity mismatch channel=${remoteId} payload=${command.playerId}`;
-    if (typeof command.commandId !== 'string' || command.commandId.length > 96) return 'invalid commandId';
+    if (typeof command.commandId !== 'string' || command.commandId.length < 3 || command.commandId.length > 96) return 'invalid commandId';
     if (!Number.isSafeInteger(command.sequence) || command.sequence < 1) return 'invalid sequence';
-    if (!Number.isSafeInteger(command.tick)) return 'invalid tick';
-    if (typeof command.previousStateHash !== 'string') return 'invalid previousStateHash';
-    if (command.type === 'move' && ![command.dx, command.dy, command.claimedX, command.claimedY].every(Number.isFinite)) return 'invalid move numbers';
-    if (command.type === 'shoot' && ![command.originX, command.originY, command.dirX, command.dirY].every(Number.isFinite)) return 'invalid shoot numbers';
+    if (!Number.isSafeInteger(command.tick) || command.tick < 0) return 'invalid tick';
+    if (typeof command.previousStateHash !== 'string' || command.previousStateHash.length !== 8) return 'invalid previousStateHash';
+    if (typeof command.membershipHash !== 'string' || command.membershipHash.length !== 8) return 'invalid membershipHash';
+
+    const membershipError = validateMembershipDescriptor(command);
+    if (membershipError) return membershipError;
+
+    if (command.type === 'move') {
+        if (![command.dx, command.dy, command.claimedX, command.claimedY].every(Number.isFinite)) return 'invalid move numbers';
+    } else {
+        if (![command.originX, command.originY, command.dirX, command.dirY].every(Number.isFinite)) return 'invalid shoot numbers';
+        if (command.claimedHitId !== null && typeof command.claimedHitId !== 'string') return 'invalid claimedHitId';
+        if (!Array.isArray(command.checkpoint) || command.checkpoint.length !== command.membershipIds.length) return 'invalid checkpoint';
+        if (typeof command.checkpointHash !== 'string' || stableHash(command.checkpoint) !== command.checkpointHash) return 'checkpoint hash mismatch';
+    }
     return null;
 }
 
@@ -395,43 +653,88 @@ function receiveCommand(remoteId, command) {
 }
 
 function executeLocal(command) {
+    if (!command) return;
     lastLocalCommand = structuredClone(command);
     acceptTentativeCommand(command, false);
     broadcast({ kind: 'command', command });
 }
 
+function rememberSeenCommand(commandId) {
+    seenCommandIds.add(commandId);
+    seenCommandQueue.push(commandId);
+    while (seenCommandQueue.length > MAX_SEEN_COMMANDS) {
+        const oldest = seenCommandQueue.shift();
+        if (oldest) seenCommandIds.delete(oldest);
+    }
+}
+
+function pendingSequenceMap(playerId) {
+    let map = pendingByPlayerSequence.get(playerId);
+    if (!map) {
+        map = new Map();
+        pendingByPlayerSequence.set(playerId, map);
+    }
+    return map;
+}
+
 function acceptTentativeCommand(command, remote) {
-    if (seenCommandIds.has(command.commandId)) {
+    if (seenCommandIds.has(command.commandId) || pendingById.has(command.commandId)) {
         duplicateCounter++;
         log('t-sys', `duplicate dropped id=${command.commandId}`);
         return;
     }
-    seenCommandIds.add(command.commandId);
-    cmdCounter++;
 
-    const expectedSequence = (confirmedSeq.get(command.playerId) || 0) + getPendingCount(command.playerId) + 1;
-    if (command.sequence !== expectedSequence) {
-        rejectCommand(command, `sequence expected=${expectedSequence} got=${command.sequence}`, true);
+    const confirmed = confirmedSeq.get(command.playerId) || 0;
+    const expectedSequence = confirmed + getPendingCount(command.playerId) + 1;
+
+    if (command.sequence > expectedSequence) {
+        deferredCommands.set(command.commandId, { command, remote, receivedAt: performance.now() });
+        log('t-sys', `command deferred id=${command.commandId} expected=${expectedSequence} got=${command.sequence}`);
+        return;
+    }
+    if (command.sequence < expectedSequence) {
+        invalidCounter++;
+        log('t-err', `sequence stale expected=${expectedSequence} got=${command.sequence}`);
         return;
     }
 
     const previousState = getPredictedTail(command.playerId);
-    if (!previousState || stateHash(previousState) !== command.previousStateHash) {
-        rejectCommand(command, 'previous state hash mismatch', true);
+    if (!previousState) {
+        deferredCommands.set(command.commandId, { command, remote, receivedAt: performance.now() });
+        log('t-sys', `command deferred: missing bootstrap state player=${command.playerId}`);
         return;
     }
 
+    if (command.tick < previousState.tick) {
+        invalidCounter++;
+        log('t-err', `tick regression previous=${previousState.tick} got=${command.tick}`);
+        return;
+    }
+    if (stateHash(previousState) !== command.previousStateHash) {
+        invalidCounter++;
+        log('t-err', `previous state hash mismatch id=${command.commandId}`);
+        return;
+    }
+
+    rememberSeenCommand(command.commandId);
+    cmdCounter++;
+
     const pending = {
         command,
+        commandHash: commandHash(command),
         previousState: { ...previousState },
         nextState: null,
         receivedAt: performance.now(),
         remote,
-        timeoutId: null
+        timeoutId: null,
+        receipts: new Map(),
+        verdict: null,
+        stalled: false,
+        membershipMatchedAtReceive: localMembershipMatches(command)
     };
 
     if (command.type === 'move') {
-        const result = computeMove(previousState, command.dx, command.dy);
+        const result = computeMove(previousState, command.dx, command.dy, command.tick);
         pending.nextState = {
             ...previousState,
             x: result.x,
@@ -444,6 +747,13 @@ function acceptTentativeCommand(command, remote) {
         visibleWorld[command.playerId] = { ...pending.nextState };
         recordHistory(command.playerId, result.x, result.y, command.sequence, command.tick);
     } else {
+        pending.nextState = {
+            ...previousState,
+            tick: command.tick,
+            sequence: command.sequence,
+            tentative: true
+        };
+        visibleWorld[command.playerId] = { ...pending.nextState };
         spawnBullet(command);
     }
 
@@ -451,133 +761,301 @@ function acceptTentativeCommand(command, remote) {
     const order = pendingOrderByPlayer.get(command.playerId) || [];
     order.push(command.commandId);
     pendingOrderByPlayer.set(command.playerId, order);
+    pendingSequenceMap(command.playerId).set(command.sequence, command.commandId);
 
-    const validator = pickValidator(command);
-    log('t-cmd', `${command.type} tentative id=${command.commandId} seq=${command.sequence} validator=${validator}`);
+    const validators = validatorsFor(command);
+    const quorum = quorumFor(command);
+    log('t-cmd', `${command.type} tentative id=${command.commandId} seq=${command.sequence} validators=${validators.join(',')} quorum=${quorum}`);
 
-    if (validator === myId) runAudit(command);
-    else {
-        pending.timeoutId = setTimeout(() => rejectCommand(command, `validator timeout (${validator})`, true), AUDIT_TIMEOUT_MS);
+    pending.timeoutId = setTimeout(() => markPendingStalled(command.commandId), AUDIT_STALL_MS);
+
+    applyOrphanReceipts(command.commandId);
+
+    if (validators.includes(myId)) {
+        queueMicrotask(() => runAudit(command));
     }
 }
 
-function runAudit(command) {
-    document.getElementById('roleTag').textContent = `Validator (${command.sequence})`;
-    setTimeout(() => document.getElementById('roleTag').textContent = 'Peer', 500);
+function markPendingStalled(commandId) {
+    const pending = pendingById.get(commandId);
+    if (!pending || pending.verdict) return;
+    pending.stalled = true;
+    const accepted = [...pending.receipts.values()].filter(receipt => receipt.accepted).length;
+    const rejected = [...pending.receipts.values()].filter(receipt => !receipt.accepted).length;
+    log('t-err', `STALLED id=${commandId} receipts=+${accepted}/-${rejected} quorum=${quorumFor(pending.command)} (timeout is not final rejection)`);
+}
 
+function validateShootCheckpoint(command, pending) {
+    const ids = command.checkpoint.map(item => item?.playerId);
+    if (ids.some(id => typeof id !== 'string')) return { ok: false, reason: 'checkpoint playerId invalid' };
+    if (ids.some((id, index) => id !== command.membershipIds[index])) return { ok: false, reason: 'checkpoint membership order mismatch' };
+
+    const world = Object.create(null);
+    for (const item of command.checkpoint) {
+        if (![item.x, item.y].every(Number.isFinite) || !Number.isSafeInteger(item.sequence) || !Number.isSafeInteger(item.tick)) {
+            return { ok: false, reason: `checkpoint state invalid player=${item.playerId}` };
+        }
+
+        const expected = item.playerId === command.playerId ? pending.previousState : confirmedWorld[item.playerId];
+        if (!expected) return { ok: false, reason: `checkpoint state missing player=${item.playerId}` };
+        if (stateHash(expected) !== stateHash(item)) {
+            return { ok: false, reason: `checkpoint differs player=${item.playerId}` };
+        }
+        world[item.playerId] = item;
+    }
+
+    return { ok: true, world };
+}
+
+function runAudit(command) {
     const pending = pendingById.get(command.commandId);
-    if (!pending) return;
+    if (!pending || pending.verdict) return;
+
+    const validators = validatorsFor(command);
+    if (!validators.includes(myId)) return;
+
+    document.getElementById('roleTag').textContent = validators.length === 1 && validators[0] === myId
+        ? `Solo Validator (${command.sequence})`
+        : `Quorum Validator (${command.sequence})`;
+    setTimeout(() => document.getElementById('roleTag').textContent = 'Peer', 500);
 
     let accepted = false;
     let reason = '';
     let computed = null;
 
-    if (command.type === 'move') {
-        computed = computeMove(pending.previousState, command.dx, command.dy);
+    if (!pending.membershipMatchedAtReceive) {
+        reason = `membership mismatch local=${stableHash(currentMembershipIds())} command=${command.membershipHash}`;
+    } else if (command.type === 'move') {
+        computed = computeMove(pending.previousState, command.dx, command.dy, command.tick);
+        const tickCheck = checkCommandTick(command.playerId, command.tick, pending.previousState.tick);
+        computed.tickWindowMax = tickCheck.maxTick;
         accepted = !computed.speedViolation
+            && tickCheck.ok
             && computed.x === command.claimedX
             && computed.y === command.claimedY
             && stateHash(pending.previousState) === command.previousStateHash;
-        reason = accepted ? 'deterministic move verified' : 'move mismatch or speed violation';
+        reason = accepted
+            ? `deterministic move verified max=${computed.maxStep}`
+            : `move invalid distance=${computed.distance} max=${computed.maxStep} tickDelta=${computed.tickDelta} tick=${tickCheck.reason || 'ok'}`;
     } else {
         const length = Math.hypot(command.dirX, command.dirY);
         const normalized = Math.abs(length - 1) < 0.02;
-        const shooter = pending.previousState;
-        const originMatches = Math.hypot(shooter.x - command.originX, shooter.y - command.originY) < 1.5;
-        const recomputedHit = rayHit(command.originX, command.originY, command.dirX, command.dirY, visibleWorld, command.playerId);
-        accepted = normalized && originMatches && recomputedHit === command.claimedHitId;
-        computed = { recomputedHit };
-        reason = accepted ? 'shoot verified' : `shoot mismatch hit=${recomputedHit || 'none'}`;
+        const originMatches = Math.hypot(
+            pending.previousState.x - command.originX,
+            pending.previousState.y - command.originY
+        ) < 1.5;
+        const checkpointResult = validateShootCheckpoint(command, pending);
+
+        if (checkpointResult.ok) {
+            const recomputedHit = rayHit(
+                command.originX,
+                command.originY,
+                command.dirX,
+                command.dirY,
+                checkpointResult.world,
+                command.playerId
+            );
+            accepted = normalized && originMatches && recomputedHit === command.claimedHitId;
+            computed = { recomputedHit, checkpointHash: command.checkpointHash };
+            reason = accepted
+                ? 'shoot verified against fixed checkpoint'
+                : `shoot mismatch hit=${recomputedHit || 'none'} normalized=${normalized} origin=${originMatches}`;
+        } else {
+            reason = checkpointResult.reason;
+        }
     }
 
     const receipt = {
-        protocol: 4,
+        protocol: PROTOCOL,
         commandId: command.commandId,
+        commandHash: pending.commandHash,
         playerId: command.playerId,
         sequence: command.sequence,
         validatorId: myId,
         accepted,
         reason,
         computed,
-        membershipVersion: command.membershipVersion
+        membershipHash: command.membershipHash
     };
 
     receiveReceipt(myId, receipt);
     broadcast({ kind: 'receipt', receipt });
 }
 
+function basicReceiptError(remoteId, receipt) {
+    if (!receipt || receipt.protocol !== PROTOCOL) return 'unsupported receipt protocol';
+    if (receipt.validatorId !== remoteId) return `receipt identity mismatch channel=${remoteId} payload=${receipt.validatorId}`;
+    if (typeof receipt.commandId !== 'string' || receipt.commandId.length > 96) return 'invalid receipt commandId';
+    if (typeof receipt.commandHash !== 'string' || receipt.commandHash.length !== 8) return 'invalid receipt commandHash';
+    if (!Number.isSafeInteger(receipt.sequence) || receipt.sequence < 1) return 'invalid receipt sequence';
+    if (typeof receipt.accepted !== 'boolean') return 'invalid receipt verdict';
+    return null;
+}
+
 function receiveReceipt(remoteId, receipt) {
-    if (!receipt || receipt.protocol !== 4 || receipt.validatorId !== remoteId) {
+    const basicError = basicReceiptError(remoteId, receipt);
+    if (basicError) {
         invalidCounter++;
-        log('t-err', `invalid receipt identity from=${remoteId}`);
+        log('t-err', `invalid receipt from=${remoteId}: ${basicError}`);
         return;
     }
 
     const pending = pendingById.get(receipt.commandId);
-    if (!pending) return;
-    const expectedValidator = pickValidator(pending.command);
-    if (expectedValidator !== remoteId) {
-        invalidCounter++;
-        log('t-err', `unauthorized receipt validator=${remoteId} expected=${expectedValidator}`);
+    if (!pending) {
+        storeOrphanReceipt(remoteId, receipt);
         return;
     }
-    if (receipt.sequence !== pending.command.sequence || receipt.playerId !== pending.command.playerId) {
-        invalidCounter++;
-        return;
-    }
-
-    validatorReceipts.set(receipt.commandId, receipt);
-    clearTimeout(pending.timeoutId);
-
-    if (receipt.accepted) confirmCommand(pending.command, receipt);
-    else rejectCommand(pending.command, receipt.reason, false);
+    applyReceiptToPending(remoteId, receipt, pending);
 }
 
-function confirmCommand(command, receipt) {
-    const pending = pendingById.get(command.commandId);
+function storeOrphanReceipt(remoteId, receipt) {
+    let bucket = orphanReceipts.get(receipt.commandId);
+    if (!bucket) {
+        if (orphanReceipts.size >= MAX_ORPHAN_COMMANDS) {
+            const oldestKey = orphanReceipts.keys().next().value;
+            orphanReceipts.delete(oldestKey);
+        }
+        bucket = new Map();
+        orphanReceipts.set(receipt.commandId, bucket);
+    }
+    bucket.set(remoteId, { remoteId, receipt, receivedAt: performance.now() });
+    log('t-sys', `orphan receipt buffered command=${receipt.commandId} validator=${remoteId}`);
+}
+
+function applyOrphanReceipts(commandId) {
+    const bucket = orphanReceipts.get(commandId);
+    if (!bucket) return;
+    orphanReceipts.delete(commandId);
+    const pending = pendingById.get(commandId);
     if (!pending) return;
+    for (const { remoteId, receipt } of bucket.values()) {
+        applyReceiptToPending(remoteId, receipt, pending);
+    }
+}
+
+function applyReceiptToPending(remoteId, receipt, pending) {
+    const command = pending.command;
+    const validators = validatorsFor(command);
+
+    if (!validators.includes(remoteId)) {
+        invalidCounter++;
+        log('t-err', `unauthorized receipt validator=${remoteId} allowed=${validators.join(',')}`);
+        return;
+    }
+    if (receipt.commandHash !== pending.commandHash
+        || receipt.membershipHash !== command.membershipHash
+        || receipt.sequence !== command.sequence
+        || receipt.playerId !== command.playerId) {
+        invalidCounter++;
+        log('t-err', `receipt binding mismatch validator=${remoteId} command=${command.commandId}`);
+        return;
+    }
+
+    if (pending.receipts.has(remoteId)) {
+        duplicateCounter++;
+        return;
+    }
+
+    pending.receipts.set(remoteId, receipt);
+    validatorReceipts.set(`${receipt.commandId}:${remoteId}`, receipt);
+    evaluatePendingVerdict(pending);
+}
+
+function evaluatePendingVerdict(pending) {
+    if (pending.verdict) return;
+
+    const validators = validatorsFor(pending.command);
+    const quorum = quorumFor(pending.command);
+    let acceptedCount = 0;
+    let rejectedCount = 0;
+
+    for (const receipt of pending.receipts.values()) {
+        if (receipt.accepted) acceptedCount++;
+        else rejectedCount++;
+    }
+
+    if (acceptedCount >= quorum) {
+        pending.verdict = 'accepted';
+        clearTimeout(pending.timeoutId);
+        drainPlayerCommits(pending.command.playerId);
+    } else if (rejectedCount > validators.length - quorum) {
+        pending.verdict = 'rejected';
+        clearTimeout(pending.timeoutId);
+        pending.rejectReason = [...pending.receipts.values()]
+            .filter(receipt => !receipt.accepted)
+            .map(receipt => `${receipt.validatorId}:${receipt.reason}`)
+            .join(' | ');
+        drainPlayerCommits(pending.command.playerId);
+    }
+}
+
+function drainPlayerCommits(playerId) {
+    while (true) {
+        const nextSequence = (confirmedSeq.get(playerId) || 0) + 1;
+        const commandId = pendingByPlayerSequence.get(playerId)?.get(nextSequence);
+        if (!commandId) break;
+
+        const pending = pendingById.get(commandId);
+        if (!pending || !pending.verdict) break;
+
+        if (pending.verdict === 'accepted') {
+            commitAcceptedPending(pending);
+        } else {
+            finalizeRejectedPending(pending, pending.rejectReason || 'quorum rejection');
+            break;
+        }
+    }
+    rebuildVisibleState(playerId);
+    tryDeferredCommands(playerId);
+}
+
+function commitAcceptedPending(pending) {
+    const command = pending.command;
 
     if (command.type === 'move') {
         confirmedWorld[command.playerId] = { ...pending.nextState, tentative: false };
-        visibleWorld[command.playerId] = { ...confirmedWorld[command.playerId] };
-    } else if (command.claimedHitId) {
-        registerHit(command.claimedHitId);
+    } else {
+        const previous = pending.previousState;
+        confirmedWorld[command.playerId] = {
+            ...previous,
+            tick: command.tick,
+            sequence: command.sequence,
+            tentative: false
+        };
+        if (command.claimedHitId) registerHit(command.claimedHitId);
     }
 
+    visibleWorld[command.playerId] = { ...confirmedWorld[command.playerId] };
     confirmedSeq.set(command.playerId, command.sequence);
+    tickAnchors.set(command.playerId, { remoteTick: command.tick, localTime: performance.now() });
     removePending(command);
     confirmedCounter++;
-    log('t-audit', `CONFIRMED id=${command.commandId} by=${receipt.validatorId} reason=${receipt.reason}`);
-    rebuildVisibleState(command.playerId);
+
+    const receipts = [...pending.receipts.values()].filter(receipt => receipt.accepted);
+    log('t-audit', `CONFIRMED seq=${command.sequence} id=${command.commandId} quorum=${receipts.length}/${quorumFor(command)} validators=${receipts.map(r => r.validatorId).join(',')}`);
+
+    if (command.playerId === myId) {
+        for (const peerId of peers.keys()) sendSnapshot(peerId);
+    }
 }
 
-function rejectCommand(command, reason, broadcastReceipt) {
+function finalizeRejectedPending(pending, reason) {
+    const command = pending.command;
     if (rejectedCommandIds.has(command.commandId)) return;
-    rejectedCommandIds.add(command.commandId);
 
-    const pending = pendingById.get(command.commandId);
-    if (pending) clearTimeout(pending.timeoutId);
+    rejectedCommandIds.add(command.commandId);
+    clearTimeout(pending.timeoutId);
     removePending(command);
     rejectedCounter++;
     hitFlashes[command.playerId] = performance.now() + 350;
-    log('t-err', `REJECTED id=${command.commandId} seq=${command.sequence} reason=${reason}`);
+    log('t-err', `REJECTED seq=${command.sequence} id=${command.commandId} reason=${reason}`);
 
     rejectDependentCommands(command.playerId, command.sequence);
-    rebuildVisibleState(command.playerId);
 
-    if (broadcastReceipt) {
-        const receipt = {
-            protocol: 4,
-            commandId: command.commandId,
-            playerId: command.playerId,
-            sequence: command.sequence,
-            validatorId: myId,
-            accepted: false,
-            reason,
-            computed: null,
-            membershipVersion: command.membershipVersion
-        };
-        broadcast({ kind: 'receipt', receipt });
+    if (command.playerId === myId) {
+        const pendingTail = pendingOrderByPlayer.get(myId) || [];
+        localSequence = (confirmedSeq.get(myId) || 0) + pendingTail.length;
+        delete moveState[myId];
     }
 }
 
@@ -588,9 +1066,10 @@ function rejectDependentCommands(playerId, rejectedSequence) {
         if (dependent && dependent.command.sequence > rejectedSequence) {
             clearTimeout(dependent.timeoutId);
             pendingById.delete(commandId);
+            pendingByPlayerSequence.get(playerId)?.delete(dependent.command.sequence);
             rejectedCommandIds.add(commandId);
             rejectedCounter++;
-            log('t-err', `dependent rollback id=${commandId}`);
+            log('t-err', `dependent rollback seq=${dependent.command.sequence} id=${commandId}`);
         }
     }
     pendingOrderByPlayer.set(playerId, (pendingOrderByPlayer.get(playerId) || []).filter(id => pendingById.has(id)));
@@ -598,6 +1077,7 @@ function rejectDependentCommands(playerId, rejectedSequence) {
 
 function removePending(command) {
     pendingById.delete(command.commandId);
+    pendingByPlayerSequence.get(command.playerId)?.delete(command.sequence);
     const order = pendingOrderByPlayer.get(command.playerId) || [];
     pendingOrderByPlayer.set(command.playerId, order.filter(id => id !== command.commandId));
 }
@@ -605,16 +1085,38 @@ function removePending(command) {
 function rebuildVisibleState(playerId) {
     const confirmed = confirmedWorld[playerId];
     if (!confirmed) return;
+
     let state = { ...confirmed, tentative: false };
     const order = pendingOrderByPlayer.get(playerId) || [];
+
     for (const commandId of order) {
         const pending = pendingById.get(commandId);
-        if (!pending || pending.command.type !== 'move') continue;
-        const result = computeMove(state, pending.command.dx, pending.command.dy);
-        state = { ...state, x: result.x, y: result.y, sequence: pending.command.sequence, tick: pending.command.tick, tentative: true };
-        pending.previousState = { ...state, sequence: pending.command.sequence - 1 };
+        if (!pending) continue;
+        const previousState = { ...state };
+
+        if (pending.command.type === 'move') {
+            const result = computeMove(previousState, pending.command.dx, pending.command.dy, pending.command.tick);
+            state = {
+                ...previousState,
+                x: result.x,
+                y: result.y,
+                sequence: pending.command.sequence,
+                tick: pending.command.tick,
+                tentative: true
+            };
+        } else {
+            state = {
+                ...previousState,
+                sequence: pending.command.sequence,
+                tick: pending.command.tick,
+                tentative: true
+            };
+        }
+
+        pending.previousState = previousState;
         pending.nextState = { ...state };
     }
+
     visibleWorld[playerId] = state;
 }
 
@@ -622,82 +1124,145 @@ function getPendingCount(playerId) {
     return (pendingOrderByPlayer.get(playerId) || []).length;
 }
 
+function tryDeferredCommands(playerId) {
+    const candidates = [...deferredCommands.values()]
+        .filter(item => item.command.playerId === playerId)
+        .sort((a, b) => a.command.sequence - b.command.sequence);
+
+    for (const item of candidates) {
+        const expected = (confirmedSeq.get(playerId) || 0) + getPendingCount(playerId) + 1;
+        if (item.command.sequence !== expected || !getPredictedTail(playerId)) continue;
+        deferredCommands.delete(item.command.commandId);
+        acceptTentativeCommand(item.command, item.remote);
+    }
+}
+
 function sendSnapshot(remoteId) {
     const peer = peers.get(remoteId);
     if (!peer?.dc || peer.dc.readyState !== 'open') return;
+
+    const state = confirmedWorld[myId];
     const snapshot = {
+        protocol: PROTOCOL,
         senderId: myId,
-        membershipVersion,
-        states: Object.values(confirmedWorld).map(state => ({ ...state })),
-        players: Object.entries(confirmedWorld).map(([playerId, state]) => ({ playerId, state: { ...state } }))
+        state: {
+            x: state.x,
+            y: state.y,
+            color: myColor,
+            tick: state.tick,
+            sequence: confirmedSeq.get(myId) || 0
+        },
+        stateHash: stateHash({ ...state, sequence: confirmedSeq.get(myId) || 0 }),
+        membershipHint: membershipDescriptor()
     };
+
     peer.dc.send(JSON.stringify({ kind: 'snapshot', snapshot }));
 }
 
 function receiveSnapshot(remoteId, snapshot) {
-    if (!snapshot || snapshot.senderId !== remoteId || !Array.isArray(snapshot.players)) return;
-    for (const item of snapshot.players) {
-        if (!item?.playerId || !item.state || !Number.isFinite(item.state.x) || !Number.isFinite(item.state.y)) continue;
-        if (item.playerId === myId) continue;
-        const localSequence = confirmedSeq.get(item.playerId) || 0;
-        if ((item.state.sequence || 0) < localSequence) continue;
-        confirmedWorld[item.playerId] = { ...item.state, color: item.state.color || colorFor(item.playerId), tentative: false };
-        visibleWorld[item.playerId] = { ...confirmedWorld[item.playerId] };
-        confirmedSeq.set(item.playerId, item.state.sequence || 0);
-        recordHistory(item.playerId, item.state.x, item.state.y, item.state.sequence || 0, item.state.tick || currentTick());
+    if (!snapshot || snapshot.protocol !== PROTOCOL || snapshot.senderId !== remoteId || !snapshot.state) {
+        invalidCounter++;
+        return;
     }
-    log('t-sys', `snapshot merged from=${remoteId}`);
+
+    const state = snapshot.state;
+    if (![state.x, state.y].every(Number.isFinite)
+        || !Number.isSafeInteger(state.sequence)
+        || state.sequence < 0
+        || !Number.isSafeInteger(state.tick)
+        || state.tick < 0) {
+        invalidCounter++;
+        return;
+    }
+
+    if (snapshot.stateHash !== stateHash(state)) {
+        invalidCounter++;
+        log('t-err', `snapshot hash mismatch from=${remoteId}`);
+        return;
+    }
+
+    const localSequence = confirmedSeq.get(remoteId);
+    if (localSequence !== undefined) {
+        if (state.sequence < localSequence) return;
+        if (state.sequence === localSequence) {
+            if (stateHash(confirmedWorld[remoteId]) !== snapshot.stateHash) {
+                invalidCounter++;
+                log('t-err', `snapshot fork detected player=${remoteId} seq=${state.sequence}`);
+            }
+            return;
+        }
+        if (state.sequence - localSequence > MAX_SNAPSHOT_SEQUENCE_JUMP) {
+            invalidCounter++;
+            log('t-err', `snapshot sequence jump rejected player=${remoteId} local=${localSequence} got=${state.sequence}`);
+            return;
+        }
+        if (getPendingCount(remoteId) > 0) {
+            log('t-sys', `snapshot deferred player=${remoteId}: local pending chain exists`);
+            return;
+        }
+    }
+
+    confirmedWorld[remoteId] = {
+        x: round6(state.x),
+        y: round6(state.y),
+        color: colorFor(remoteId),
+        tick: state.tick,
+        sequence: state.sequence,
+        tentative: false
+    };
+    visibleWorld[remoteId] = { ...confirmedWorld[remoteId] };
+    confirmedSeq.set(remoteId, state.sequence);
+    tickAnchors.set(remoteId, { remoteTick: state.tick, localTime: performance.now() });
+    recordHistory(remoteId, state.x, state.y, state.sequence, state.tick);
+    log('t-sys', `self-owned snapshot merged from=${remoteId} seq=${state.sequence}`);
+    tryDeferredCommands(remoteId);
 }
 
-/* ============================================================
-   렌더 전용 이동 힌트(moveIntent)
-   기존 makeMoveCommand/tickMovement 체인(previousStateHash로 묶인 시퀀스,
-   검증자 감사, tentative/confirmed)은 "권위 있는 위치가 뭐냐"를 안전하게
-   합의하기 위한 것이고, 그 안전성 때문에 어쩔 수 없이 저빈도(90ms)로 돈다.
-   근데 렌더링을 그 체크포인트 빈도에 맞춰버리면 화면이 끊겨 보인다
-   (11Hz 시뮬레이션을 그대로 그리는 셈).
-   → 그래서 "권위 있는 위치 검증"과 "화면에 뭘 그릴지"를 분리한다.
-   우클릭한 그 순간, (start, target, duration)을 딱 한 번만 브로드캐스트하고
-   (moveIntent — 감사 파이프라인과 무관, 위조돼도 게임 상태에 영향 없음,
-   순수 표시용 예측), 매 requestAnimationFrame마다 그 곡선을 로컬에서
-   직접 계산해서 그린다. 실제 권위 있는 위치(hit 판정 등에 쓰이는 값)는
-   여전히 기존 체크포인트 커맨드가 검증해서 confirmedWorld/visibleWorld를
-   갱신하고, 두 트랙은 서로 방해하지 않는다.
-   ============================================================ */
+/* 렌더 전용 이동 힌트. 권위 상태와 판정에는 사용하지 않는다. */
 function broadcastMoveIntent(playerId, movement) {
     broadcast({
         kind: 'moveIntent',
         intent: {
             playerId,
-            startX: movement.startX, startY: movement.startY,
-            targetX: movement.targetX, targetY: movement.targetY,
-            naturalDuration: movement.naturalDuration,
-            maxDuration: MOVE_MAX_DURATION
+            startX: movement.startX,
+            startY: movement.startY,
+            targetX: movement.targetX,
+            targetY: movement.targetY,
+            naturalDuration: movement.naturalDuration
         }
     });
 }
 
 function receiveMoveIntent(remoteId, intent) {
-    if (!intent || intent.playerId !== remoteId) { invalidCounter++; return; }
+    if (!intent || intent.playerId !== remoteId) {
+        invalidCounter++;
+        return;
+    }
+
     const numbers = [intent.startX, intent.startY, intent.targetX, intent.targetY, intent.naturalDuration];
-    if (!numbers.every(Number.isFinite)) { invalidCounter++; return; }
-    // 위조돼도 게임 판정에 전혀 관여하지 않는 순수 표시값이라, 검증 없이 바로 반영해도
-    // 안전함(최악의 경우 상대 화면에서 잠깐 이상하게 움직이는 정도 — 권위 상태는 무사함).
+    if (!numbers.every(Number.isFinite)) {
+        invalidCounter++;
+        return;
+    }
+
+    const now = performance.now();
+    const duration = Math.max(1, Math.min(MOVE_MAX_DURATION, intent.naturalDuration));
     moveState[intent.playerId] = {
-        startX: intent.startX, startY: intent.startY,
-        targetX: intent.targetX, targetY: intent.targetY,
-        startTime: performance.now(),
-        naturalDuration: Math.max(1, intent.naturalDuration),
-        hardStopAt: performance.now() + (Number.isFinite(intent.maxDuration) ? intent.maxDuration : MOVE_MAX_DURATION),
-        lastX: intent.startX, lastY: intent.startY
+        startX: intent.startX,
+        startY: intent.startY,
+        targetX: intent.targetX,
+        targetY: intent.targetY,
+        startTime: now,
+        naturalDuration: duration,
+        hardStopAt: now + MOVE_MAX_DURATION,
+        lastX: intent.startX,
+        lastY: intent.startY
     };
 }
 
-// (start,target,duration)만으로 "지금 이 순간" 위치를 순수 계산 — 몇 Hz로 샘플링됐는지와
-// 무관하게 호출할 때마다(=매 프레임) 정확한 값이 나옴. 이게 핵심.
 function evalMoveSegment(movement, now) {
     const timedOut = now >= movement.hardStopAt;
-    let progress = (now - movement.startTime) / movement.naturalDuration;
+    const progress = (now - movement.startTime) / movement.naturalDuration;
     const finished = timedOut || progress >= 1;
     const eased = easeInOutQuad(Math.max(0, Math.min(1, progress)));
     return {
@@ -710,14 +1275,12 @@ function evalMoveSegment(movement, now) {
 function recordHistory(playerId, x, y, sequence, tick) {
     const history = posHistory[playerId] || (posHistory[playerId] = []);
     history.push({ t: performance.now(), x, y, sequence, tick });
-    while (history.length > 30) history.shift();
+    while (history.length > 60) history.shift();
 }
 
 function getRenderPosition(playerId) {
     const state = visibleWorld[playerId];
     if (!state) return null;
-    // 활성 이동 세그먼트가 있으면 항상 그걸 매 프레임 직접 계산 — 나/봇/원격 구분 없음.
-    // 세그먼트가 없거나 끝났으면 권위 있는 최신 확정/잠정 위치로 자연스럽게 폴백.
     const movement = moveState[playerId];
     if (movement) {
         const evaluated = evalMoveSegment(movement, performance.now());
@@ -729,6 +1292,7 @@ function getRenderPosition(playerId) {
 function rayHit(originX, originY, dirX, dirY, worldSnapshot, excludeId) {
     let closestId = null;
     let closestDistance = Infinity;
+
     for (const [playerId, state] of Object.entries(worldSnapshot)) {
         if (playerId === excludeId || !state || !Number.isFinite(state.x)) continue;
         const px = state.x - originX;
@@ -743,6 +1307,7 @@ function rayHit(originX, originY, dirX, dirY, worldSnapshot, excludeId) {
             closestDistance = projection;
         }
     }
+
     return closestId;
 }
 
@@ -768,47 +1333,43 @@ function easeInOutQuad(t) {
 
 function startMove(playerId, fromX, fromY, toX, toY) {
     const distance = Math.hypot(toX - fromX, toY - fromY);
-    const naturalDuration = Math.max(MOVE_MIN_DURATION, distance / MOVE_SPEED * 1000);
+    const naturalDuration = Math.min(MOVE_MAX_DURATION, Math.max(MOVE_MIN_DURATION, distance / MOVE_SPEED * 1000));
+    const now = performance.now();
+
     moveState[playerId] = {
         startX: fromX,
         startY: fromY,
         targetX: toX,
         targetY: toY,
-        startTime: performance.now(),
+        startTime: now,
         naturalDuration,
-        hardStopAt: performance.now() + MOVE_MAX_DURATION,
+        hardStopAt: now + MOVE_MAX_DURATION,
         lastX: fromX,
         lastY: fromY
     };
+
     if (playerId === myId) broadcastMoveIntent(playerId, moveState[playerId]);
 }
 
 function tickMovement() {
     const now = performance.now();
+
     for (const playerId of Object.keys(moveState)) {
         const movement = moveState[playerId];
         if (!movement) continue;
-        const timedOut = now >= movement.hardStopAt;
-        let progress = (now - movement.startTime) / movement.naturalDuration;
-        let finished = timedOut;
-        if (progress >= 1) {
-            progress = 1;
-            finished = true;
-        }
-        const eased = easeInOutQuad(Math.min(progress, 1));
-        const currentX = movement.startX + (movement.targetX - movement.startX) * eased;
-        const currentY = movement.startY + (movement.targetY - movement.startY) * eased;
-        const dx = currentX - movement.lastX;
-        const dy = currentY - movement.lastY;
+        const evaluated = evalMoveSegment(movement, now);
+        const dx = evaluated.x - movement.lastX;
+        const dy = evaluated.y - movement.lastY;
 
         if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) {
             if (playerId === myId) executeLocal(makeMoveCommand(dx, dy));
             else if (bots.has(playerId)) moveBot(playerId, dx, dy);
         }
-        movement.lastX = currentX;
-        movement.lastY = currentY;
 
-        if (finished) {
+        movement.lastX = evaluated.x;
+        movement.lastY = evaluated.y;
+
+        if (evaluated.finished) {
             if (bots.has(playerId)) assignRandomBotTarget(playerId);
             else delete moveState[playerId];
         }
@@ -817,8 +1378,17 @@ function tickMovement() {
 
 function moveBot(playerId, dx, dy) {
     const previous = visibleWorld[playerId];
-    const result = computeMove(previous, dx, dy);
-    const next = { ...previous, x: result.x, y: result.y, tick: currentTick(), sequence: previous.sequence + 1 };
+    if (!previous) return;
+    const tick = currentTick();
+    const result = computeMove(previous, dx, dy, tick);
+    const next = {
+        ...previous,
+        x: result.x,
+        y: result.y,
+        tick,
+        sequence: previous.sequence + 1,
+        tentative: false
+    };
     confirmedWorld[playerId] = { ...next };
     visibleWorld[playerId] = { ...next };
     confirmedSeq.set(playerId, next.sequence);
@@ -834,12 +1404,13 @@ function resizeCanvas() {
     canvas.height = canvas.clientHeight * devicePixelRatio;
     context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
 }
+
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 canvas.addEventListener('click', event => {
     const rect = canvas.getBoundingClientRect();
-    const me = visibleWorld[myId];
+    const me = getRenderPosition(myId) || visibleWorld[myId];
     const dx = event.clientX - rect.left - me.x;
     const dy = event.clientY - rect.top - me.y;
     const distance = Math.hypot(dx, dy) || 1;
@@ -849,7 +1420,7 @@ canvas.addEventListener('click', event => {
 canvas.addEventListener('contextmenu', event => {
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();
-    const me = visibleWorld[myId];
+    const me = getRenderPosition(myId) || visibleWorld[myId];
     startMove(myId, me.x, me.y, event.clientX - rect.left, event.clientY - rect.top);
 });
 
@@ -862,13 +1433,15 @@ window.addEventListener('keydown', event => {
     else if (event.key === 'ArrowLeft') dx = -step;
     else if (event.key === 'ArrowRight') dx = step;
     else return;
+
     event.preventDefault();
     delete moveState[myId];
     executeLocal(makeMoveCommand(dx, dy));
 });
 
 function spawnStressBots(count) {
-    for (let i = 0; i < count; i++) {
+    const safeCount = Math.max(1, Math.min(1500, count));
+    for (let i = 0; i < safeCount; i++) {
         const id = `bot-${Math.random().toString(36).slice(2, 8)}`;
         const x = Math.random() * canvas.clientWidth;
         const y = Math.random() * canvas.clientHeight;
@@ -876,11 +1449,12 @@ function spawnStressBots(count) {
         initializePlayer(id, x, y, colorFor(id));
         assignRandomBotTarget(id);
     }
-    log('t-sys', `local stress bots +${count}, total=${bots.size}`);
+    log('t-sys', `local-only stress bots +${safeCount}, total=${bots.size}`);
 }
 
 function assignRandomBotTarget(playerId) {
     const state = visibleWorld[playerId];
+    if (!state) return;
     startMove(playerId, state.x, state.y, Math.random() * canvas.clientWidth, Math.random() * canvas.clientHeight);
 }
 
@@ -891,6 +1465,7 @@ function clearStressBots() {
         delete moveState[id];
         delete posHistory[id];
         confirmedSeq.delete(id);
+        tickAnchors.delete(id);
     }
     bots.clear();
 }
@@ -900,18 +1475,23 @@ window.clearStressBots = clearStressBots;
 
 window.cheatTeleport = () => {
     const command = makeMoveCommand(500, 500);
-    command.claimedX = visibleWorld[myId].x + 500;
-    command.claimedY = visibleWorld[myId].y + 500;
+    if (!command) return;
+    command.tick += 1000000;
+    const previous = getPredictedTail(myId);
+    command.claimedX = round6(previous.x + 500);
+    command.claimedY = round6(previous.y + 500);
     executeLocal(command);
+    log('t-cmd', '[CHEAT] future-tick teleport submitted; quorum should reject it');
 };
 
 window.spoofIdentity = () => {
     const peerId = [...peers.keys()][0];
     if (!peerId) return log('t-err', 'spoofIdentity: 연결된 peer가 없음');
     const command = makeMoveCommand(10, 0);
+    if (!command) return;
     command.playerId = peerId;
     broadcast({ kind: 'command', command });
-    log('t-cmd', `[CHEAT] forged playerId=${peerId}`);
+    log('t-cmd', `[CHEAT] forged playerId=${peerId}; channel identity should reject it`);
 };
 
 window.replayLastCommand = () => {
@@ -921,12 +1501,28 @@ window.replayLastCommand = () => {
     log('t-cmd', `[CHEAT] replay id=${lastLocalCommand.commandId}`);
 };
 
+window.forgeSnapshot = () => {
+    const peerId = [...peers.keys()][0];
+    if (!peerId) return log('t-err', 'forgeSnapshot: 연결된 peer가 없음');
+    const peer = peers.get(peerId);
+    const victimId = [...peers.keys()][0];
+    const fake = {
+        protocol: PROTOCOL,
+        senderId: myId,
+        state: { x: 999, y: 999, color: myColor, tick: currentTick(), sequence: confirmedSeq.get(myId) || 0 },
+        membershipHint: membershipDescriptor()
+    };
+    fake.stateHash = stateHash(fake.state);
+    peer.dc.send(JSON.stringify({ kind: 'snapshot', snapshot: fake }));
+    log('t-cmd', `[CHEAT] snapshot can only claim senderId=${myId}; third-party victim=${victimId} field no longer exists`);
+};
+
 function draw() {
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     context.clearRect(0, 0, width, height);
 
-    const me = visibleWorld[myId];
+    const me = getRenderPosition(myId);
     if (me) {
         context.beginPath();
         context.arc(me.x, me.y, 140, 0, Math.PI * 2);
@@ -958,16 +1554,25 @@ function draw() {
         const state = visibleWorld[playerId];
         const render = getRenderPosition(playerId);
         if (!render) continue;
+
         const isMe = playerId === myId;
         const isBot = bots.has(playerId);
         const flashing = performance.now() < (hitFlashes[playerId] || 0);
+        const playerPending = (pendingOrderByPlayer.get(playerId) || [])
+            .map(id => pendingById.get(id))
+            .filter(Boolean);
+        const isStalled = playerPending.some(pending => pending.stalled);
 
         context.beginPath();
         context.arc(render.x, render.y, isMe ? 9 : 7, 0, Math.PI * 2);
         context.fillStyle = flashing ? '#fff' : state.color || '#888';
         context.fill();
 
-        if (state.tentative) {
+        if (isStalled) {
+            context.lineWidth = 3;
+            context.strokeStyle = '#ef5b6e';
+            context.stroke();
+        } else if (state.tentative) {
             context.lineWidth = 2;
             context.strokeStyle = '#f2a93b';
             context.stroke();
@@ -982,37 +1587,55 @@ function draw() {
             context.font = '10px monospace';
             const hitLabel = hits[playerId] ? ` [hit×${hits[playerId]}]` : '';
             const tentativeLabel = state.tentative ? ' [pending]' : '';
-            context.fillText(`${playerId}${isMe ? ' (you)' : ''}${hitLabel}${tentativeLabel}`, render.x + 12, render.y + 4);
+            const stalledLabel = isStalled ? ' [stalled]' : '';
+            context.fillText(`${playerId}${isMe ? ' (you)' : ''}${hitLabel}${tentativeLabel}${stalledLabel}`, render.x + 12, render.y + 4);
         }
     }
 
     requestAnimationFrame(draw);
 }
+
 requestAnimationFrame(draw);
 
 function updatePeerList() {
     document.getElementById('connCount').textContent = [...peers.values()].filter(peer => peer.dc?.readyState === 'open').length;
     const element = document.getElementById('peerList');
+
     if (peers.size === 0) {
         element.innerHTML = '<span style="color:var(--dim)">다른 탭 대기 중...</span>';
         return;
     }
+
     element.innerHTML = '';
     for (const [peerId, peer] of peers) {
         const row = document.createElement('div');
         row.className = 'peerRow';
         const connected = peer.dc?.readyState === 'open';
         const stateColor = connected ? 'var(--accent)' : peer.state === 'connecting' ? 'var(--warn)' : 'var(--err)';
-        row.innerHTML = `<span><span class="dot" style="background:${stateColor}"></span>${peerId}</span><span style="color:${stateColor}">${connected ? 'connected' : peer.state}</span>`;
+        const left = document.createElement('span');
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.style.background = stateColor;
+        left.appendChild(dot);
+        left.appendChild(document.createTextNode(peerId));
+        const right = document.createElement('span');
+        right.style.color = stateColor;
+        right.textContent = connected ? 'connected' : peer.state;
+        row.append(left, right);
         element.appendChild(row);
     }
 }
 
 const logElement = document.getElementById('log');
-let pendingLogs = [];
+
 function log(className, message) {
-    pendingLogs.push({ className, message, time: new Date().toLocaleTimeString('ko-KR', { hour12: false }) });
+    pendingLogs.push({
+        className,
+        message,
+        time: new Date().toLocaleTimeString('ko-KR', { hour12: false })
+    });
 }
+
 function flushLogs() {
     if (!pendingLogs.length) return;
     const fragment = document.createDocumentFragment();
@@ -1028,8 +1651,26 @@ function flushLogs() {
     pendingLogs = [];
 }
 
-setInterval(tickMovement, 90);
+function pruneEphemeralBuffers() {
+    const now = performance.now();
+    for (const [commandId, bucket] of orphanReceipts) {
+        for (const [validatorId, item] of bucket) {
+            if (now - item.receivedAt > ORPHAN_RECEIPT_TTL_MS) bucket.delete(validatorId);
+        }
+        if (bucket.size === 0) orphanReceipts.delete(commandId);
+    }
+    for (const [commandId, item] of deferredCommands) {
+        if (now - item.receivedAt > ORPHAN_RECEIPT_TTL_MS) {
+            deferredCommands.delete(commandId);
+            invalidCounter++;
+            log('t-err', `deferred command expired id=${commandId}`);
+        }
+    }
+}
+
+setInterval(tickMovement, STEP_INTERVAL_MS);
 setInterval(flushLogs, 120);
+setInterval(pruneEphemeralBuffers, 1000);
 setInterval(() => document.getElementById('tick').textContent = `TICK ${currentTick()}`, 100);
 setInterval(() => {
     document.getElementById('botStat').textContent = bots.size;
@@ -1041,17 +1682,18 @@ setInterval(() => {
     document.getElementById('invalidStat').textContent = invalidCounter;
     cmdCounter = 0;
 }, 1000);
-setInterval(() => {
-    if (peers.size === 0) sendSignal({ type: 'announce' });
-}, 3000);
+
+setInterval(() => sendSignal({ type: 'announce' }), 3000);
 
 window.addEventListener('beforeunload', () => {
     for (const [, peer] of peers) peer.pc?.close();
+    CHANNEL.close();
 });
 
 sendSignal({ type: 'announce' });
 updatePeerList();
-log('t-sys', `local peer boot id=${myId}`);
+log('t-sys', `local peer boot id=${myId} protocol=${PROTOCOL}`);
+
 </script>
 </body>
 </html>
