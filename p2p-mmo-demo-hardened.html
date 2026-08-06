@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Distributed World Runtime — Hardened P2P Demo v3</title>
+<title>Distributed World Runtime — Hardened P2P Demo v4</title>
 <style>
 :root{
     --bg:#0a0e12;--panel:#10161c;--line:#1c2733;--grid:#141b22;
@@ -37,19 +37,23 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
 #log div{margin-bottom:2px;white-space:pre-wrap;word-break:break-word}.t-sig{color:var(--warn)}.t-cmd{color:var(--accent)}.t-audit{color:var(--audit)}.t-err{color:var(--err)}.t-sys{color:var(--dim)}
 .legend{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10px;color:var(--dim)}
 .badge{display:inline-block;padding:1px 5px;border:1px solid var(--line);border-radius:9px;font-size:9px;margin-left:4px}
+#signalState[data-state="open"]{color:var(--accent)}
+#signalState[data-state="connecting"],#signalState[data-state="reconnecting"]{color:var(--warn)}
+#signalState[data-state="error"],#signalState[data-state="closed"]{color:var(--err)}
+#signalRoom,#signalMode{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
 </style>
 </head>
 <body>
 <header>
     <h1>Distributed World Runtime</h1>
-    <span class="sub">WebRTC P2P · in-order commit · quorum receipts · self-owned snapshots · fixed shoot checkpoints</span>
+    <span class="sub">WebRTC P2P · WebSocket/Broadcast signaling · in-order commit · quorum receipts · self-owned snapshots</span>
     <span id="tick">TICK 0</span>
 </header>
 <main>
     <div id="stage">
         <canvas id="canvas"></canvas>
-        <div id="hint">좌클릭: 사격 · 우클릭: 목적지 이동 · 방향키: 즉시 이동 · 주황=쿼럼 대기 · 빨강=stalled · 콘솔 cheatTeleport(), spoofIdentity(), replayLastCommand(), forgeSnapshot()</div>
+        <div id="hint">좌클릭: 사격 · 우클릭: 목적지 이동 · 방향키: 즉시 이동 · 주황=쿼럼 대기 · 빨강=stalled · 콘솔 getSignalingState(), reconnectSignaling(), cheatTeleport(), spoofIdentity()</div>
     </div>
     <aside>
         <div class="block">
@@ -58,6 +62,13 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
             <div class="row"><span>connections</span><span id="connCount">0</span></div>
             <div class="row"><span>membership</span><span id="membershipVersion">0</span></div>
             <div class="row"><span>role</span><span id="roleTag">Peer</span></div>
+        </div>
+        <div class="block">
+            <h2>Signaling</h2>
+            <div class="row"><span>mode</span><span id="signalMode">-</span></div>
+            <div class="row"><span>room</span><span id="signalRoom">-</span></div>
+            <div class="row"><span>state</span><span id="signalState" data-state="closed">idle</span></div>
+            <button class="btnGhost" style="width:100%;margin-top:6px" onclick="reconnectSignaling()">reconnect signaling</button>
         </div>
         <div class="block">
             <h2>Connected Peers</h2>
@@ -95,7 +106,7 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
 'use strict';
 
 /*
- * Hardened P2P demo v3
+ * Hardened P2P demo v4
  *
  * 이 파일은 "서버 없는 P2P가 완전한 권위 서버를 대체한다"고 주장하지 않는다.
  * 대신 v2에서 실제로 깨지던 항목을 코드 수준에서 막는다.
@@ -108,6 +119,9 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
  * 6. client tick advance에 상한을 둔다.
  * 7. shoot는 명령에 고정된 confirmed checkpoint를 사용한다.
  * 8. move뿐 아니라 shoot commit도 player sequence를 전진시킨다.
+ * 9. signal/room URL 파라미터가 있으면 WebSocket 시그널링 서버에 join한다.
+ * 10. WebSocket 연결 상태, 송수신, 오류, 재연결을 화면 로그와 콘솔에 남긴다.
+ * 11. signal 파라미터가 없을 때만 BroadcastChannel 로컬 탭 모드로 폴백한다.
  *
  * 남는 한계:
  * - 브라우저 클라이언트만으로 구성된 P2P는 Sybil, 담합, 수정 클라이언트,
@@ -117,8 +131,21 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
  */
 
 const PROTOCOL = 5;
-const CHANNEL = new BroadcastChannel('mmo-p2p-signal-v5');
+const SIGNAL_PROTOCOL = 1;
+const URL_PARAMS = new URLSearchParams(location.search);
+const RAW_SIGNAL_URL = (URL_PARAMS.get('signal') || '').trim();
+const ROOM_ID = sanitizeRoomId(URL_PARAMS.get('room') || 'default');
+const SIGNAL_URL = normalizeSignalUrl(RAW_SIGNAL_URL);
+const SIGNAL_MODE = RAW_SIGNAL_URL ? 'websocket' : 'broadcast-channel';
+const LOCAL_SIGNAL_CHANNEL_NAME = `mmo-p2p-signal-v5:${ROOM_ID}`;
 const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+const SIGNAL_CONNECT_TIMEOUT_MS = 45000;
+const SIGNAL_RECONNECT_BASE_MS = 800;
+const SIGNAL_RECONNECT_MAX_MS = 15000;
+const SIGNAL_QUEUE_TTL_MS = 10000;
+const SIGNAL_QUEUE_MAX = 256;
+const SIGNAL_KEEPALIVE_MS = 25000;
 
 const TICK_MS = 1000 / 30;
 const BASE_MAX_STEP = 50;
@@ -143,7 +170,21 @@ const myId = randomId(8);
 const myColor = colorFor(myId);
 const roomEpoch = performance.now();
 
+let localSignalChannel = null;
+let signalingSocket = null;
+let signalingSocketGeneration = 0;
+let signalReconnectAttempt = 0;
+let signalReconnectTimer = null;
+let signalConnectTimeout = null;
+let signalKeepaliveTimer = null;
+let signalManualClose = false;
+let signalQueue = [];
+let signalSentCount = 0;
+let signalReceivedCount = 0;
+
 document.getElementById('peerId').textContent = myId;
+document.getElementById('signalMode').textContent = SIGNAL_MODE;
+document.getElementById('signalRoom').textContent = ROOM_ID;
 
 const peers = new Map();
 const prePeerIce = new Map();
@@ -426,38 +467,319 @@ function getPredictedTail(playerId) {
     return confirmedWorld[playerId] || null;
 }
 
-function sendSignal(message) {
-    CHANNEL.postMessage({ ...message, from: myId, signalTick: currentTick() });
+function sanitizeRoomId(value) {
+    const normalized = String(value || 'default').trim().slice(0, 64);
+    return (normalized || 'default').replace(/[^a-zA-Z0-9_.:-]/g, '_');
 }
 
-function broadcast(message) {
-    const payload = JSON.stringify(message);
-    for (const [, peer] of peers) {
-        if (peer.dc?.readyState === 'open') peer.dc.send(payload);
+function normalizeSignalUrl(value) {
+    if (!value) return null;
+    try {
+        const url = new URL(value, location.href);
+        if (!['ws:', 'wss:'].includes(url.protocol)) return null;
+        if (location.protocol === 'https:' && url.protocol !== 'wss:') return null;
+        url.hash = '';
+        return url.toString();
+    } catch (_) {
+        return null;
     }
 }
 
-CHANNEL.onmessage = async event => {
-    const message = event.data;
-    if (!message || message.from === myId) return;
+function updateSignalStatus(state, label = state) {
+    const element = document.getElementById('signalState');
+    if (!element) return;
+    element.dataset.state = state;
+    element.textContent = label;
+}
+
+function signalLog(className, message, detail = null) {
+    const line = `[SIGNAL] ${message}`;
+    log(className, line);
+    const consoleMethod = className === 't-err' ? 'error' : className === 't-sig' ? 'info' : 'debug';
+    if (detail == null) console[consoleMethod](line);
+    else console[consoleMethod](line, detail);
+}
+
+function signalEnvelope(message) {
+    return {
+        ...message,
+        from: myId,
+        signalProtocol: SIGNAL_PROTOCOL,
+        signalTick: currentTick()
+    };
+}
+
+function isSignalReady() {
+    if (SIGNAL_MODE === 'websocket') return signalingSocket?.readyState === WebSocket.OPEN;
+    return Boolean(localSignalChannel);
+}
+
+function queueSignal(envelope) {
+    const now = Date.now();
+    signalQueue = signalQueue.filter(item => now - item.queuedAt <= SIGNAL_QUEUE_TTL_MS);
+
+    // 주기적 announce가 소켓 대기열을 도배하지 않게 마지막 하나만 보존한다.
+    if (envelope.type === 'announce') {
+        signalQueue = signalQueue.filter(item => item.envelope.type !== 'announce');
+    }
+
+    signalQueue.push({ envelope, queuedAt: now });
+    if (signalQueue.length > SIGNAL_QUEUE_MAX) signalQueue.splice(0, signalQueue.length - SIGNAL_QUEUE_MAX);
+}
+
+function sendSignal(message) {
+    const envelope = signalEnvelope(message);
+
+    if (SIGNAL_MODE === 'websocket') {
+        if (signalingSocket?.readyState === WebSocket.OPEN) {
+            try {
+                signalingSocket.send(JSON.stringify(envelope));
+                signalSentCount++;
+                return true;
+            } catch (error) {
+                signalLog('t-err', `send failed type=${message.type}: ${error.message}`);
+            }
+        }
+        queueSignal(envelope);
+        return false;
+    }
+
+    if (localSignalChannel) {
+        localSignalChannel.postMessage(envelope);
+        signalSentCount++;
+        return true;
+    }
+
+    signalLog('t-err', `local signaling unavailable type=${message.type}`);
+    return false;
+}
+
+function flushSignalQueue() {
+    if (SIGNAL_MODE !== 'websocket' || signalingSocket?.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    const queued = signalQueue;
+    signalQueue = [];
+    let sent = 0;
+    let dropped = 0;
+
+    for (const item of queued) {
+        if (now - item.queuedAt > SIGNAL_QUEUE_TTL_MS) {
+            dropped++;
+            continue;
+        }
+        try {
+            signalingSocket.send(JSON.stringify(item.envelope));
+            signalSentCount++;
+            sent++;
+        } catch (error) {
+            queueSignal(item.envelope);
+            signalLog('t-err', `queued send failed: ${error.message}`);
+            break;
+        }
+    }
+
+    if (sent || dropped) signalLog('t-sys', `queue flushed sent=${sent} dropped=${dropped}`);
+}
+
+function sendJoin() {
+    if (signalingSocket?.readyState !== WebSocket.OPEN) return false;
+    const join = {
+        type: 'join',
+        channelId: ROOM_ID,
+        peerId: myId,
+        signalProtocol: SIGNAL_PROTOCOL
+    };
+    signalingSocket.send(JSON.stringify(join));
+    signalSentCount++;
+    signalLog('t-sig', `join sent room=${ROOM_ID} peer=${myId}`);
+    return true;
+}
+
+function clearSignalTimers() {
+    clearTimeout(signalReconnectTimer);
+    clearTimeout(signalConnectTimeout);
+    clearInterval(signalKeepaliveTimer);
+    signalReconnectTimer = null;
+    signalConnectTimeout = null;
+    signalKeepaliveTimer = null;
+}
+
+function scheduleSignalReconnect(reason) {
+    if (signalManualClose || SIGNAL_MODE !== 'websocket') return;
+    clearTimeout(signalReconnectTimer);
+    const exponential = Math.min(
+        SIGNAL_RECONNECT_MAX_MS,
+        SIGNAL_RECONNECT_BASE_MS * (2 ** Math.min(signalReconnectAttempt, 6))
+    );
+    const delay = Math.round(exponential * (0.85 + Math.random() * 0.3));
+    signalReconnectAttempt++;
+    updateSignalStatus('reconnecting', `retry ${Math.ceil(delay / 1000)}s`);
+    signalLog('t-sig', `reconnect scheduled in ${delay}ms reason=${reason}`);
+    signalReconnectTimer = setTimeout(connectWebSocketSignaling, delay);
+}
+
+function connectWebSocketSignaling() {
+    if (SIGNAL_MODE !== 'websocket' || signalManualClose) return;
+    if (!SIGNAL_URL) {
+        updateSignalStatus('error', 'invalid URL');
+        signalLog('t-err', `invalid signal URL raw=${RAW_SIGNAL_URL || '(empty)'}`);
+        return;
+    }
+    if (signalingSocket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(signalingSocket.readyState)) return;
+
+    clearTimeout(signalReconnectTimer);
+    clearTimeout(signalConnectTimeout);
+    const generation = ++signalingSocketGeneration;
+    updateSignalStatus('connecting', 'connecting');
+    signalLog('t-sig', `connecting url=${SIGNAL_URL} room=${ROOM_ID} attempt=${signalReconnectAttempt + 1}`);
+
+    let socket;
+    try {
+        socket = new WebSocket(SIGNAL_URL);
+    } catch (error) {
+        signalLog('t-err', `constructor failed: ${error.message}`);
+        scheduleSignalReconnect('constructor failure');
+        return;
+    }
+    signalingSocket = socket;
+
+    signalConnectTimeout = setTimeout(() => {
+        if (generation !== signalingSocketGeneration || socket.readyState !== WebSocket.CONNECTING) return;
+        signalLog('t-err', `connect timeout after ${SIGNAL_CONNECT_TIMEOUT_MS}ms`);
+        try { socket.close(4000, 'connect timeout'); } catch (_) {}
+    }, SIGNAL_CONNECT_TIMEOUT_MS);
+
+    socket.onopen = () => {
+        if (generation !== signalingSocketGeneration) return;
+        clearTimeout(signalConnectTimeout);
+        signalReconnectAttempt = 0;
+        updateSignalStatus('open', 'open');
+        signalLog('t-sig', `open url=${SIGNAL_URL}`);
+
+        // 서버 규칙상 join이 반드시 첫 메시지여야 한다. WebSocket은 전송 순서를 보장한다.
+        sendJoin();
+        flushSignalQueue();
+        sendSignal({ type: 'announce' });
+
+        clearInterval(signalKeepaliveTimer);
+        signalKeepaliveTimer = setInterval(() => {
+            if (socket.readyState !== WebSocket.OPEN) return;
+            try {
+                socket.send(JSON.stringify(signalEnvelope({ type: 'keepalive', to: myId })));
+                signalSentCount++;
+            } catch (error) {
+                signalLog('t-err', `keepalive failed: ${error.message}`);
+            }
+        }, SIGNAL_KEEPALIVE_MS);
+    };
+
+    socket.onmessage = event => {
+        if (generation !== signalingSocketGeneration) return;
+        if (typeof event.data !== 'string') {
+            signalLog('t-err', 'non-text signaling message dropped');
+            return;
+        }
+        if (event.data.length > 256 * 1024) {
+            signalLog('t-err', `oversized signaling message dropped bytes=${event.data.length}`);
+            return;
+        }
+        let message;
+        try {
+            message = JSON.parse(event.data);
+        } catch (error) {
+            signalLog('t-err', `invalid signaling JSON: ${error.message}`);
+            return;
+        }
+        signalReceivedCount++;
+        handleSignalMessage(message, 'websocket');
+    };
+
+    socket.onerror = event => {
+        if (generation !== signalingSocketGeneration) return;
+        updateSignalStatus('error', 'error');
+        signalLog('t-err', 'WebSocket error; close event should contain the final code', event);
+    };
+
+    socket.onclose = event => {
+        if (generation !== signalingSocketGeneration) return;
+        clearTimeout(signalConnectTimeout);
+        clearInterval(signalKeepaliveTimer);
+        signalingSocket = null;
+        const reason = event.reason || 'no reason';
+        updateSignalStatus('closed', `closed ${event.code}`);
+        signalLog(
+            event.code === 1000 && signalManualClose ? 't-sys' : 't-err',
+            `closed code=${event.code} clean=${event.wasClean} reason=${reason}`
+        );
+        scheduleSignalReconnect(`close ${event.code}`);
+    };
+}
+
+function startSignalingTransport() {
+    signalManualClose = false;
+
+    if (SIGNAL_MODE === 'websocket') {
+        connectWebSocketSignaling();
+        return;
+    }
+
+    if (typeof BroadcastChannel !== 'function') {
+        updateSignalStatus('error', 'unsupported');
+        signalLog('t-err', 'BroadcastChannel is not supported in this browser');
+        return;
+    }
+
+    localSignalChannel = new BroadcastChannel(LOCAL_SIGNAL_CHANNEL_NAME);
+    localSignalChannel.onmessage = event => {
+        signalReceivedCount++;
+        handleSignalMessage(event.data, 'broadcast-channel');
+    };
+    updateSignalStatus('open', 'local open');
+    signalLog('t-sig', `local channel open name=${LOCAL_SIGNAL_CHANNEL_NAME}`);
+    sendSignal({ type: 'announce' });
+}
+
+async function handleSignalMessage(message, source) {
+    if (!message || typeof message !== 'object') {
+        signalLog('t-err', `invalid signaling envelope source=${source}`);
+        return;
+    }
+    if (message.from === myId) return;
+    if (typeof message.from !== 'string' || !message.from || message.from.length > 96) {
+        signalLog('t-err', `invalid signaling sender source=${source}`);
+        return;
+    }
+    if (message.to && message.to !== myId) return;
 
     try {
         if (message.type === 'announce') {
+            signalLog('t-sig', `announce received from=${message.from} via=${source}`);
             if (myId < message.from && !peers.has(message.from)) {
                 await createPeer(message.from, true);
             } else if (!peers.has(message.from)) {
-                peers.set(message.from, { pc: null, dc: null, state: 'awaiting-offer', remoteId: message.from, pendingIce: [] });
+                peers.set(message.from, {
+                    pc: null,
+                    dc: null,
+                    state: 'awaiting-offer',
+                    remoteId: message.from,
+                    pendingIce: []
+                });
                 updatePeerList();
             }
         } else if (message.type === 'offer' && message.to === myId) {
+            signalLog('t-sig', `offer received from=${message.from}`);
             await createPeer(message.from, false, message.sdp);
         } else if (message.type === 'answer' && message.to === myId) {
+            signalLog('t-sig', `answer received from=${message.from}`);
             const peer = peers.get(message.from);
             if (peer?.pc) {
                 await peer.pc.setRemoteDescription(message.sdp);
                 await flushIceQueue(peer);
+            } else {
+                signalLog('t-err', `answer without peer context from=${message.from}`);
             }
         } else if (message.type === 'ice' && message.to === myId) {
+            console.debug(`[SIGNAL] ICE received from=${message.from}`);
             const peer = peers.get(message.from);
             if (peer?.pc && peer.pc.remoteDescription) {
                 await peer.pc.addIceCandidate(message.candidate);
@@ -469,11 +791,54 @@ CHANNEL.onmessage = async event => {
                 queued.push(message.candidate);
                 prePeerIce.set(message.from, queued);
             }
+        } else if (message.type !== 'keepalive') {
+            signalLog('t-err', `unknown signaling type=${String(message.type)} source=${source}`);
         }
     } catch (error) {
-        log('t-err', `signaling error from=${message.from}: ${error.message}`);
+        signalLog('t-err', `handling failed type=${message.type} from=${message.from}: ${error.message}`);
     }
-};
+}
+
+function reconnectSignaling() {
+    signalLog('t-sig', 'manual reconnect requested');
+    clearSignalTimers();
+    signalManualClose = false;
+
+    if (SIGNAL_MODE === 'broadcast-channel') {
+        try { localSignalChannel?.close(); } catch (_) {}
+        localSignalChannel = null;
+        startSignalingTransport();
+        return;
+    }
+
+    const oldSocket = signalingSocket;
+    signalingSocket = null;
+    signalingSocketGeneration++;
+    try { oldSocket?.close(1000, 'manual reconnect'); } catch (_) {}
+    signalReconnectAttempt = 0;
+    connectWebSocketSignaling();
+}
+
+window.reconnectSignaling = reconnectSignaling;
+window.getSignalingState = () => ({
+    mode: SIGNAL_MODE,
+    url: SIGNAL_URL,
+    rawUrl: RAW_SIGNAL_URL,
+    room: ROOM_ID,
+    peerId: myId,
+    readyState: SIGNAL_MODE === 'websocket' ? signalingSocket?.readyState ?? WebSocket.CLOSED : (localSignalChannel ? 'open' : 'closed'),
+    queued: signalQueue.length,
+    sent: signalSentCount,
+    received: signalReceivedCount,
+    peers: [...peers.keys()]
+});
+
+function broadcast(message) {
+    const payload = JSON.stringify(message);
+    for (const [, peer] of peers) {
+        if (peer.dc?.readyState === 'open') peer.dc.send(payload);
+    }
+}
 
 async function flushIceQueue(entry) {
     if (!entry?.pc?.remoteDescription) return;
@@ -1683,16 +2048,22 @@ setInterval(() => {
     cmdCounter = 0;
 }, 1000);
 
-setInterval(() => sendSignal({ type: 'announce' }), 3000);
+setInterval(() => {
+    if (isSignalReady()) sendSignal({ type: 'announce' });
+}, 3000);
 
 window.addEventListener('beforeunload', () => {
+    signalManualClose = true;
+    clearSignalTimers();
+    signalingSocketGeneration++;
+    try { signalingSocket?.close(1000, 'page unload'); } catch (_) {}
+    try { localSignalChannel?.close(); } catch (_) {}
     for (const [, peer] of peers) peer.pc?.close();
-    CHANNEL.close();
 });
 
-sendSignal({ type: 'announce' });
+startSignalingTransport();
 updatePeerList();
-log('t-sys', `local peer boot id=${myId} protocol=${PROTOCOL}`);
+log('t-sys', `local peer boot id=${myId} protocol=${PROTOCOL} signalMode=${SIGNAL_MODE} room=${ROOM_ID}`);
 
 </script>
 </body>
