@@ -47,7 +47,7 @@ button{cursor:pointer;border-radius:3px;padding:5px 7px}
 <body>
 <header>
     <h1>Distributed World Runtime</h1>
-    <span class="sub">WebRTC P2P · WebSocket/Broadcast signaling · in-order commit · quorum receipts · self-owned snapshots</span>
+    <span class="sub">WebRTC P2P · WebSocket/Broadcast signaling · in-order commit · quorum receipts · idempotent peer teardown</span>
     <span id="tick">TICK 0</span>
 </header>
 <main>
@@ -189,6 +189,8 @@ document.getElementById('signalRoom').textContent = ROOM_ID;
 const peers = new Map();
 const prePeerIce = new Map();
 const disconnectTimers = new Map();
+const tearingDownPeers = new Set();
+let pageUnloading = false;
 
 const confirmedWorld = Object.create(null);
 const visibleWorld = Object.create(null);
@@ -791,6 +793,9 @@ async function handleSignalMessage(message, source) {
                 queued.push(message.candidate);
                 prePeerIce.set(message.from, queued);
             }
+        } else if (message.type === 'leave' && message.to === myId) {
+            signalLog('t-sys', `leave received from=${message.from} via=${source}`);
+            removePeer(message.from, 'signaling leave');
         } else if (message.type !== 'keepalive') {
             signalLog('t-err', `unknown signaling type=${String(message.type)} source=${source}`);
         }
@@ -835,8 +840,16 @@ window.getSignalingState = () => ({
 
 function broadcast(message) {
     const payload = JSON.stringify(message);
-    for (const [, peer] of peers) {
-        if (peer.dc?.readyState === 'open') peer.dc.send(payload);
+    for (const [peerId, peer] of [...peers]) {
+        if (peer.dc?.readyState !== 'open') continue;
+        try {
+            peer.dc.send(payload);
+        } catch (error) {
+            // readyState 확인과 실제 send 사이에도 채널이 닫힐 수 있다.
+            // 종료 경쟁은 네트워크 오류가 아니라 정상적인 수명주기이므로 peer 정리로 수렴시킨다.
+            log('t-sys', `broadcast skipped closing peer=${peerId}: ${error.message}`);
+            removePeer(peerId, 'send on closing data channel');
+        }
     }
 }
 
@@ -873,8 +886,13 @@ async function createPeer(remoteId, isOfferer, remoteSdp) {
     };
 
     pc.onconnectionstatechange = () => {
+        // 이미 다른 종료 경로가 이 peer를 정리 중이면 늦게 도착한 상태 이벤트는 무시한다.
+        if (pageUnloading || tearingDownPeers.has(remoteId) || peers.get(remoteId) !== entry) return;
+
         entry.state = pc.connectionState;
-        clearTimeout(disconnectTimers.get(remoteId));
+        const previousTimer = disconnectTimers.get(remoteId);
+        if (previousTimer) clearTimeout(previousTimer);
+        disconnectTimers.delete(remoteId);
 
         if (pc.connectionState === 'connected') {
             // RTCPeerConnection만 연결됐을 때는 DataChannel이 아직 열리지 않았을 수 있다.
@@ -883,11 +901,13 @@ async function createPeer(remoteId, isOfferer, remoteSdp) {
         } else if (pc.connectionState === 'disconnected') {
             const timer = setTimeout(() => {
                 const current = peers.get(remoteId);
-                if (current?.pc?.connectionState === 'disconnected') removePeer(remoteId, 'disconnect timeout');
+                if (current === entry && current.pc?.connectionState === 'disconnected') {
+                    removePeer(remoteId, 'disconnect timeout');
+                }
             }, DISCONNECT_GRACE_MS);
             disconnectTimers.set(remoteId, timer);
         } else if (['failed', 'closed'].includes(pc.connectionState)) {
-            removePeer(remoteId, pc.connectionState);
+            removePeer(remoteId, `peer connection ${pc.connectionState}`);
         }
         updatePeerList();
     };
@@ -895,18 +915,25 @@ async function createPeer(remoteId, isOfferer, remoteSdp) {
     function bindChannel(dc) {
         entry.dc = dc;
         dc.onopen = () => {
+            if (pageUnloading || tearingDownPeers.has(remoteId) || peers.get(remoteId) !== entry) return;
             log('t-sig', `DataChannel open ↔ ${remoteId}`);
             refreshMembership('data channel open');
             sendSnapshot(remoteId);
             updatePeerList();
         };
-        dc.onmessage = event => handleWireMessage(remoteId, event.data);
-        dc.onclose = () => {
-            log('t-sys', `DataChannel close ↔ ${remoteId}`);
-            refreshMembership('data channel close');
-            updatePeerList();
+        dc.onmessage = event => {
+            if (pageUnloading || tearingDownPeers.has(remoteId) || peers.get(remoteId) !== entry) return;
+            handleWireMessage(remoteId, event.data);
         };
-        dc.onerror = event => log('t-err', `DataChannel error ↔ ${remoteId}: ${event?.message || 'unknown'}`);
+        dc.onclose = () => {
+            if (pageUnloading || tearingDownPeers.has(remoteId) || peers.get(remoteId) !== entry) return;
+            log('t-sys', `DataChannel close ↔ ${remoteId}`);
+            removePeer(remoteId, 'data channel closed');
+        };
+        dc.onerror = event => {
+            if (pageUnloading || tearingDownPeers.has(remoteId) || peers.get(remoteId) !== entry) return;
+            log('t-err', `DataChannel error ↔ ${remoteId}: ${event?.message || 'unknown'}`);
+        };
     }
 
     if (isOfferer) {
@@ -926,25 +953,114 @@ async function createPeer(remoteId, isOfferer, remoteSdp) {
     updatePeerList();
 }
 
-function removePeer(remoteId, reason) {
-    const peer = peers.get(remoteId);
-    if (!peer) return;
-    clearTimeout(disconnectTimers.get(remoteId));
-    disconnectTimers.delete(remoteId);
-    try { peer.dc?.close(); } catch (_) {}
-    try { peer.pc?.close(); } catch (_) {}
-    peers.delete(remoteId);
-
-    delete visibleWorld[remoteId];
-    delete confirmedWorld[remoteId];
-    delete posHistory[remoteId];
-    delete moveState[remoteId];
-    confirmedSeq.delete(remoteId);
+function purgePeerProtocolState(remoteId) {
+    prePeerIce.delete(remoteId);
     tickAnchors.delete(remoteId);
 
-    refreshMembership('peer removed');
-    updatePeerList();
-    log('t-err', `peer removed ↔ ${remoteId} (${reason})`);
+    // 떠난 플레이어가 만든 명령은 더 이상 월드에 적용할 대상이 없으므로 폐기한다.
+    const ownedPending = [...pendingById.values()]
+        .filter(pending => pending.command.playerId === remoteId);
+    for (const pending of ownedPending) {
+        clearTimeout(pending.timeoutId);
+        removePending(pending.command);
+        rejectedCommandIds.add(pending.command.commandId);
+    }
+    pendingOrderByPlayer.delete(remoteId);
+    pendingByPlayerSequence.delete(remoteId);
+
+    for (const [commandId, item] of [...deferredCommands]) {
+        if (item.command.playerId === remoteId || item.remote === remoteId) {
+            deferredCommands.delete(commandId);
+        }
+    }
+
+    // 떠난 검증자의 영수증과, 그 검증자를 기다리던 아직 미결인 명령을 정리한다.
+    for (const [commandId, bucket] of [...orphanReceipts]) {
+        bucket.delete(remoteId);
+        if (bucket.size === 0) orphanReceipts.delete(commandId);
+    }
+    for (const key of [...validatorReceipts.keys()]) {
+        if (key.endsWith(`:${remoteId}`)) validatorReceipts.delete(key);
+    }
+
+    const invalidatedPlayers = new Set();
+    const invalidated = [...pendingById.values()].filter(pending =>
+        !pending.verdict && validatorsFor(pending.command).includes(remoteId)
+    );
+    for (const pending of invalidated) {
+        pending.verdict = 'rejected';
+        pending.rejectReason = `membership changed: validator ${remoteId} departed`;
+        clearTimeout(pending.timeoutId);
+        invalidatedPlayers.add(pending.command.playerId);
+    }
+    for (const playerId of invalidatedPlayers) drainPlayerCommits(playerId);
+}
+
+function removePeer(remoteId, reason = 'unknown') {
+    if (!remoteId || remoteId === myId || tearingDownPeers.has(remoteId)) return false;
+
+    const peer = peers.get(remoteId);
+    if (!peer) {
+        const timer = disconnectTimers.get(remoteId);
+        if (timer) clearTimeout(timer);
+        disconnectTimers.delete(remoteId);
+        prePeerIce.delete(remoteId);
+        return false;
+    }
+
+    tearingDownPeers.add(remoteId);
+    const wasMember = peer.dc?.readyState === 'open';
+
+    try {
+        // 먼저 map에서 제거해야 close 이벤트가 재진입해도 같은 peer를 다시 정리하지 않는다.
+        peers.delete(remoteId);
+
+        const timer = disconnectTimers.get(remoteId);
+        if (timer) clearTimeout(timer);
+        disconnectTimers.delete(remoteId);
+
+        // close()가 발생시키는 늦은 이벤트가 이미 제거된 상태를 건드리지 못하도록 핸들러부터 해제한다.
+        if (peer.dc) {
+            peer.dc.onopen = null;
+            peer.dc.onmessage = null;
+            peer.dc.onclose = null;
+            peer.dc.onerror = null;
+        }
+        if (peer.pc) {
+            peer.pc.onicecandidate = null;
+            peer.pc.onconnectionstatechange = null;
+            peer.pc.ondatachannel = null;
+        }
+
+        try {
+            if (peer.dc && peer.dc.readyState !== 'closed') peer.dc.close();
+        } catch (error) {
+            log('t-sys', `DataChannel close ignored peer=${remoteId}: ${error.message}`);
+        }
+        try {
+            if (peer.pc && peer.pc.connectionState !== 'closed') peer.pc.close();
+        } catch (error) {
+            log('t-sys', `PeerConnection close ignored peer=${remoteId}: ${error.message}`);
+        }
+
+        purgePeerProtocolState(remoteId);
+        delete visibleWorld[remoteId];
+        delete confirmedWorld[remoteId];
+        delete posHistory[remoteId];
+        delete moveState[remoteId];
+        delete hitFlashes[remoteId];
+        delete hits[remoteId];
+        confirmedSeq.delete(remoteId);
+
+        if (!pageUnloading) {
+            if (wasMember) refreshMembership('peer removed');
+            updatePeerList();
+            log('t-sys', `peer removed ↔ ${remoteId} (${reason})`);
+        }
+        return true;
+    } finally {
+        tearingDownPeers.delete(remoteId);
+    }
 }
 
 function handleWireMessage(remoteId, raw) {
@@ -962,6 +1078,7 @@ function handleWireMessage(remoteId, raw) {
     else if (message.kind === 'receipt') receiveReceipt(remoteId, message.receipt);
     else if (message.kind === 'snapshot') receiveSnapshot(remoteId, message.snapshot);
     else if (message.kind === 'moveIntent') receiveMoveIntent(remoteId, message.intent);
+    else if (message.kind === 'leave') removePeer(remoteId, 'data channel leave');
     else {
         invalidCounter++;
         log('t-err', `unknown wire message from=${remoteId}`);
@@ -1528,7 +1645,12 @@ function sendSnapshot(remoteId) {
         membershipHint: membershipDescriptor()
     };
 
-    peer.dc.send(JSON.stringify({ kind: 'snapshot', snapshot }));
+    try {
+        peer.dc.send(JSON.stringify({ kind: 'snapshot', snapshot }));
+    } catch (error) {
+        log('t-sys', `snapshot skipped closing peer=${remoteId}: ${error.message}`);
+        removePeer(remoteId, 'snapshot send failed');
+    }
 }
 
 function receiveSnapshot(remoteId, snapshot) {
@@ -2071,14 +2193,31 @@ setInterval(() => {
     if (isSignalReady()) sendSignal({ type: 'announce' });
 }, 3000);
 
-window.addEventListener('beforeunload', () => {
+function shutdownLocalPeer() {
+    if (pageUnloading) return;
+    pageUnloading = true;
     signalManualClose = true;
     clearSignalTimers();
+
+    // 가능하면 명시적 leave를 먼저 보낸다. 전달되지 않아도 WebRTC 종료 감지가 최종 폴백이다.
+    for (const [peerId, peer] of [...peers]) {
+        try {
+            if (peer.dc?.readyState === 'open') {
+                peer.dc.send(JSON.stringify({ kind: 'leave', peerId: myId }));
+            }
+        } catch (_) {}
+        try { sendSignal({ type: 'leave', to: peerId }); } catch (_) {}
+    }
+
     signalingSocketGeneration++;
     try { signalingSocket?.close(1000, 'page unload'); } catch (_) {}
     try { localSignalChannel?.close(); } catch (_) {}
-    for (const [, peer] of peers) peer.pc?.close();
-});
+
+    for (const peerId of [...peers.keys()]) removePeer(peerId, 'local page unload');
+}
+
+window.addEventListener('pagehide', shutdownLocalPeer, { once: true });
+window.addEventListener('beforeunload', shutdownLocalPeer, { once: true });
 
 startSignalingTransport();
 updatePeerList();
