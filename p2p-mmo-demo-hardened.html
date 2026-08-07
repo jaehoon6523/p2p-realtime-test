@@ -203,6 +203,11 @@ const AOI_RADIUS = clampNumber(params.get('aoi'), 260, 120, 1400);
 const COMMITTEE_SIZE = Math.round(clampNumber(params.get('committee'), 3, 1, 7));
 const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
+// 모든 피어가 공유하는 논리 월드. 브라우저/canvas 크기는 렌더 viewport일 뿐 게임 경계가 아니다.
+const WORLD_WIDTH = 1000;
+const WORLD_HEIGHT = 760;
+const WORLD_MARGIN = 14;
+
 const TICK_MS = 1000 / 30;
 const STEP_INTERVAL_MS = 90;
 const BASE_MAX_STEP = 50;
@@ -361,8 +366,15 @@ function normalizeSignalUrl(value){
     if(!value) return null;
     try{ const url=new URL(value,location.href); if(!['ws:','wss:'].includes(url.protocol)) return null; if(location.protocol==='https:'&&url.protocol!=='wss:') return null; url.hash=''; return url.toString(); }catch(_){ return null; }
 }
-function randomSpawnX(){ return 60 + Math.random()*Math.max(120,canvas.clientWidth-120); }
-function randomSpawnY(){ return 70 + Math.random()*Math.max(140,canvas.clientHeight-140); }
+function randomSpawnX(){ return 60 + Math.random()*Math.max(120,WORLD_WIDTH-120); }
+function randomSpawnY(){ return 70 + Math.random()*Math.max(140,WORLD_HEIGHT-140); }
+function clampWorldPoint(x,y){ return {x:Math.max(WORLD_MARGIN,Math.min(WORLD_WIDTH-WORLD_MARGIN,x)),y:Math.max(WORLD_MARGIN,Math.min(WORLD_HEIGHT-WORLD_MARGIN,y))}; }
+function screenToWorld(clientX,clientY){
+    const rect=canvas.getBoundingClientRect();
+    const x=(clientX-rect.left)/Math.max(1,rect.width)*WORLD_WIDTH;
+    const y=(clientY-rect.top)/Math.max(1,rect.height)*WORLD_HEIGHT;
+    return clampWorldPoint(x,y);
+}
 function createCommandId(playerId,sequence){ return `${playerId}:${sequence}:${randomId(12)}`; }
 
 function initializePlayer(playerId,x,y,color=colorFor(playerId),options={}){
@@ -498,7 +510,7 @@ function checkCommandTick(playerId,tick,previousTick){
     const elapsed=Math.max(0,Math.floor((performance.now()-anchor.localTime)/TICK_MS)); const max=anchor.remoteTick+elapsed+12;
     return tick<=max?{ok:true}:{ok:false,reason:`future remote tick got=${tick} max=${max}`};
 }
-function inBounds(x,y){ return Number.isFinite(x)&&Number.isFinite(y)&&x>=10&&y>=10&&x<=canvas.clientWidth-10&&y<=canvas.clientHeight-10; }
+function inBounds(x,y){ return Number.isFinite(x)&&Number.isFinite(y)&&x>=WORLD_MARGIN&&y>=WORLD_MARGIN&&x<=WORLD_WIDTH-WORLD_MARGIN&&y<=WORLD_HEIGHT-WORLD_MARGIN; }
 
 function getPredictedTail(playerId){
     const ids=pendingOrderByPlayer.get(playerId)||[];
@@ -511,8 +523,12 @@ function makeBaseCommand(type,previous){
 }
 function makeMoveCommand(dx,dy){
     const prev=getPredictedTail(myId); if(!prev||!prev.alive) return null;
-    const command=makeBaseCommand('move',prev); const result=computeMove(prev,dx,dy,command.tick);
-    return {...command,dx:round6(dx),dy:round6(dy),claimedX:result.x,claimedY:result.y};
+    // 입력이 월드 밖을 향해도 command 자체는 항상 canonical world 안에 머물게 한다.
+    const desired=clampWorldPoint(prev.x+dx,prev.y+dy);
+    const safeDx=desired.x-prev.x,safeDy=desired.y-prev.y;
+    if(Math.abs(safeDx)<=1e-9&&Math.abs(safeDy)<=1e-9) return null;
+    const command=makeBaseCommand('move',prev); const result=computeMove(prev,safeDx,safeDy,command.tick);
+    return {...command,dx:round6(safeDx),dy:round6(safeDy),claimedX:result.x,claimedY:result.y};
 }
 function buildShootCheckpoint(shooter){
     const membership=membershipDescriptor(); const checkpoint=[]; const world=Object.create(null);
@@ -724,6 +740,16 @@ function rejectCommand(command,reason){
 function rejectDependents(playerId,sequence){
     for(const id of [...(pendingOrderByPlayer.get(playerId)||[])]){ const pending=pendingById.get(id); if(pending&&pending.command.sequence>sequence){ clearTimeout(pending.timeoutId); pendingById.delete(id); rejectedCounter++; log('t-warn',`dependent rollback id=${id}`); } }
     pendingOrderByPlayer.set(playerId,(pendingOrderByPlayer.get(playerId)||[]).filter(id=>pendingById.has(id)));
+    // rejected sequence 뒤에 이미 만들어진 deferred 명령을 남기면 sequence hole이 영구화된다.
+    for(const [id,item] of [...deferredCommands]){
+        if(item.command.playerId===playerId&&item.command.sequence>=sequence){ deferredCommands.delete(id); seenCommandIds.delete(id); log('t-warn',`deferred dropped after rejection id=${id}`); }
+    }
+    if(playerId===myId){
+        localSequence=(confirmedSeq.get(myId)||0)+(pendingOrderByPlayer.get(myId)||[]).length;
+        const tail=getPredictedTail(myId); const movement=moveState[myId];
+        if(movement&&tail){ movement.lastX=tail.x; movement.lastY=tail.y; }
+        tracePosition('sequence:recovered',{force:true,extra:`rejected=${sequence} localSequence=${localSequence}`});
+    }
 }
 function removePending(command){
     const pending=pendingById.get(command.commandId); if(pending) clearTimeout(pending.timeoutId);
@@ -1138,18 +1164,26 @@ function removePeer(remoteId,reason='unknown'){
     }finally{ tearingDownPeers.delete(remoteId); }
 }
 
-function resizeCanvas(){ canvas.width=canvas.clientWidth*devicePixelRatio; canvas.height=canvas.clientHeight*devicePixelRatio; context.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+function resizeCanvas(){ canvas.width=canvas.clientWidth*devicePixelRatio; canvas.height=canvas.clientHeight*devicePixelRatio; }
+function beginWorldFrame(){
+    const sx=canvas.clientWidth/WORLD_WIDTH,sy=canvas.clientHeight/WORLD_HEIGHT;
+    context.setTransform(devicePixelRatio*sx,0,0,devicePixelRatio*sy,0,0);
+    context.clearRect(0,0,WORLD_WIDTH,WORLD_HEIGHT);
+}
 window.addEventListener('resize',resizeCanvas); resizeCanvas();
 canvas.addEventListener('click',event=>{
     if(!roomReady) return;
-    // 사격도 화면만 앞서 있는 좌표를 쓰지 않도록 현재 이동분을 먼저 event chain에 맞춘다.
     flushActiveMoveToNow();
-    const me=getPredictedTail(myId); if(!me?.alive) return; const rect=canvas.getBoundingClientRect(); const dx=event.clientX-rect.left-me.x,dy=event.clientY-rect.top-me.y,distance=Math.hypot(dx,dy)||1; executeLocal(makeShootCommand(dx/distance,dy/distance));
+    const me=getPredictedTail(myId); if(!me?.alive) return;
+    const point=screenToWorld(event.clientX,event.clientY);
+    const dx=point.x-me.x,dy=point.y-me.y,distance=Math.hypot(dx,dy)||1;
+    executeLocal(makeShootCommand(dx/distance,dy/distance));
 });
 canvas.addEventListener('contextmenu',event=>{
-    event.preventDefault(); if(!roomReady) return; const me=getPredictedTail(myId); if(!me?.alive) return; const rect=canvas.getBoundingClientRect(); const render=getRenderPosition(myId)||me;
-    tracePosition('click:right',{force:true,extra:`click=${(event.clientX-rect.left).toFixed(2)},${(event.clientY-rect.top).toFixed(2)}`});
-    startMove(myId,render.x,render.y,event.clientX-rect.left,event.clientY-rect.top);
+    event.preventDefault(); if(!roomReady) return; const me=getPredictedTail(myId); if(!me?.alive) return;
+    const point=screenToWorld(event.clientX,event.clientY); const render=getRenderPosition(myId)||me;
+    tracePosition('click:right',{force:true,extra:`worldClick=${point.x.toFixed(2)},${point.y.toFixed(2)}`});
+    startMove(myId,render.x,render.y,point.x,point.y);
 });
 window.addEventListener('keydown',event=>{
     if(!roomReady) return;
@@ -1158,7 +1192,7 @@ window.addEventListener('keydown',event=>{
 });
 
 function draw(){
-    const width=canvas.clientWidth,height=canvas.clientHeight; context.clearRect(0,0,width,height); const now=performance.now();
+    beginWorldFrame(); const now=performance.now();
     const localRender=getRenderPosition(myId); if(localRender){ context.beginPath(); context.arc(localRender.x,localRender.y,AOI_RADIUS,0,Math.PI*2); context.strokeStyle='rgba(61,220,151,.32)'; context.lineWidth=1.5; context.setLineDash([6,6]); context.stroke(); context.setLineDash([]); }
     for(let i=bullets.length-1;i>=0;i--){ const bullet=bullets[i],age=now-bullet.born; if(age>BULLET_TRAIL_MS){ bullets.splice(i,1); continue; } context.globalAlpha=1-age/BULLET_TRAIL_MS; context.strokeStyle=bullet.color; context.lineWidth=1.5; context.beginPath(); context.moveTo(bullet.x1,bullet.y1); context.lineTo(bullet.x2,bullet.y2); context.stroke(); context.globalAlpha=1; }
     // 1.5-hop 상태는 발견/사전 로딩용 유령 표시일 뿐, 전투 판정에는 절대 들어가지 않는다.
@@ -1258,7 +1292,7 @@ setInterval(()=>{
 setInterval(()=>{ if(signalingSocket?.readyState===WebSocket.OPEN) sendSignal({type:'announce'}); },3000);
 setInterval(()=>{ networkMetrics.txRate=networkMetrics.txMessagesWindow; networkMetrics.rxRate=networkMetrics.rxMessagesWindow; networkMetrics.txByteRate=networkMetrics.txBytesWindow; networkMetrics.rxByteRate=networkMetrics.rxBytesWindow; networkMetrics.txMessagesWindow=networkMetrics.rxMessagesWindow=networkMetrics.txBytesWindow=networkMetrics.rxBytesWindow=0; },1000);
 
-log('t-sys',`local peer boot id=${myId} protocol=${PROTOCOL} signalProtocol=${SIGNAL_PROTOCOL} room=${ROOM_ID} aoi=${AOI_RADIUS} committee=${COMMITTEE_SIZE} relay=1.5-hop`);
+log('t-sys',`local peer boot id=${myId} protocol=${PROTOCOL} signalProtocol=${SIGNAL_PROTOCOL} room=${ROOM_ID} world=${WORLD_WIDTH}x${WORLD_HEIGHT} margin=${WORLD_MARGIN} aoi=${AOI_RADIUS} committee=${COMMITTEE_SIZE} relay=1.5-hop`);
 </script>
 
 <script type="application/json" id="architectureIdeaIndex">
