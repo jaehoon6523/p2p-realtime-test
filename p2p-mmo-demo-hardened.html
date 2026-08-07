@@ -275,6 +275,7 @@ function tracePosition(reason,{force=false,now=performance.now(),extra=''}={}){
     const text=`[POS#${seq}] ${reason} render=${fmtPos(render)} predicted=${fmtPos(predicted)} visible=${fmtPos(visible)} confirmed=${fmtPos(confirmed)} eval=${fmtPos(evaluated)} target=${movement?`${movement.targetX.toFixed(2)},${movement.targetY.toFixed(2)}`:'-'} last=${movement?`${movement.lastX.toFixed(2)},${movement.lastY.toFixed(2)}`:'-'} dR-P=${fmtDist(dRP)} dP-V=${fmtDist(dPV)} dP-C=${fmtDist(dPC)} dR-T=${fmtDist(dRT)} seq=${predicted?.sequence??'-'} phase=${phase}${extra?` ${extra}`:''}`;
     log(diverged?'t-warn':'t-pos',text);
 }
+const localRenderState={fromX:null,fromY:null,toX:null,toY:null,startedAt:0,duration:1};
 const remoteRenderState = Object.create(null); // remote authoritative interpolation only
 const relayWorld = new Map(); // discovery-only 1.5-hop summaries; never authoritative
 const seenRelayRecords = new Map();
@@ -332,6 +333,7 @@ document.getElementById('peerId').textContent = myId;
 document.getElementById('signalRoom').textContent = ROOM_ID;
 
 initializePlayer(myId, randomSpawnX(), randomSpawnY(), myColor);
+queueLocalRenderTarget(visibleWorld[myId],{snap:true});
 refreshMembership('boot');
 startSignaling();
 requestAnimationFrame(draw);
@@ -733,7 +735,8 @@ function rebuildVisible(playerId){
     let state={...base,tentative:false};
     for(const id of pendingOrderByPlayer.get(playerId)||[]){ const pending=pendingById.get(id); if(!pending) continue; pending.previousState={...state}; pending.nextState=predictNextState(state,pending.command); state={...pending.nextState}; }
     visibleWorld[playerId]=state;
-    if(playerId!==myId) queueRemoteRenderTarget(playerId,state);
+    if(playerId===myId) queueLocalRenderTarget(state);
+    else queueRemoteRenderTarget(playerId,state);
 }
 function acceptDeferred(playerId){
     let progressed=true;
@@ -858,9 +861,10 @@ function flushActiveMoveToNow(now=performance.now()){
     if(!movement) return {sample:null,tail:getPredictedTail(myId)};
     tracePosition('flush:before',{force:true,now});
     const sample=evalMove(movement,now);
-    const dx=sample.x-movement.lastX,dy=sample.y-movement.lastY;
+    const dx=sample.x-movement.sampleX,dy=sample.y-movement.sampleY;
     if(Math.abs(dx)>1e-6||Math.abs(dy)>1e-6){
         executeLocal(makeMoveCommand(dx,dy));
+        movement.sampleX=sample.x; movement.sampleY=sample.y;
         const tail=getPredictedTail(myId);
         if(tail){ movement.lastX=tail.x; movement.lastY=tail.y; }
         else{ movement.lastX=sample.x; movement.lastY=sample.y; }
@@ -887,9 +891,25 @@ function startMove(playerId,fromX,fromY,toX,toY){
     if(distance<=1e-6){ delete moveState[myId]; return; }
     const currentSpeed=sampled&&!sampled.finished?sampled.speed:0;
     const profile=buildMoveProfile(distance,currentSpeed);
-    moveState[myId]={startX,startY,targetX:toX,targetY:toY,dirX:dx/distance,dirY:dy/distance,distance,startTime:now,profile,hardStopAt:now+Math.max(MOVE_MAX_DURATION,(profile.totalTime+1)*1000),lastX:startX,lastY:startY};
+    moveState[myId]={startX,startY,targetX:toX,targetY:toY,dirX:dx/distance,dirY:dy/distance,distance,startTime:now,profile,hardStopAt:now+Math.max(MOVE_MAX_DURATION,(profile.totalTime+1)*1000),sampleX:startX,sampleY:startY,lastX:startX,lastY:startY};
     tracePosition('retarget:armed',{force:true,now,extra:`start=${startX.toFixed(2)},${startY.toFixed(2)} speed0=${currentSpeed.toFixed(2)} dist=${distance.toFixed(2)}`});
 }
+function sampleLocalRender(now=performance.now()){
+    const state=getPredictedTail(myId)||visibleWorld[myId]; if(!state) return null;
+    const t=localRenderState;
+    if(!Number.isFinite(t.toX)||!Number.isFinite(t.toY)) return {x:state.x,y:state.y};
+    const p=Math.max(0,Math.min(1,(now-t.startedAt)/Math.max(1,t.duration))); const e=p*p*(3-2*p);
+    return {x:t.fromX+(t.toX-t.fromX)*e,y:t.fromY+(t.toY-t.fromY)*e};
+}
+function queueLocalRenderTarget(state,{snap=false}={}){
+    if(!state||![state.x,state.y].every(Number.isFinite)) return;
+    const now=performance.now(),cur=sampleLocalRender(now)||state;
+    if(snap||!Number.isFinite(localRenderState.toX)||Math.hypot(state.x-cur.x,state.y-cur.y)>REMOTE_SNAP_DISTANCE){
+        Object.assign(localRenderState,{fromX:state.x,fromY:state.y,toX:state.x,toY:state.y,startedAt:now,duration:1}); return;
+    }
+    Object.assign(localRenderState,{fromX:cur.x,fromY:cur.y,toX:state.x,toY:state.y,startedAt:now,duration:Math.max(55,STEP_INTERVAL_MS*1.05)});
+}
+
 function sampleRemoteRender(playerId,now=performance.now()){
     const state=visibleWorld[playerId]; if(!state) return null;
     const track=remoteRenderState[playerId]; if(!track) return state;
@@ -911,32 +931,31 @@ function queueRemoteRenderTarget(playerId,state,{snap=false}={}){
     remoteRenderState[playerId]={fromX:current.x,fromY:current.y,toX:state.x,toY:state.y,startedAt:now,duration:REMOTE_INTERPOLATION_MS};
 }
 function getRenderPosition(playerId){
-    if(playerId===myId){
-        const state=getPredictedTail(myId)||visibleWorld[myId]; if(!state) return null;
-        const movement=moveState[myId]; return movement?evalMove(movement,performance.now()):state;
-    }
+    if(playerId===myId) return sampleLocalRender();
     return sampleRemoteRender(playerId);
 }
 function tickMovement(){
     if(!roomReady) return;
     const now=performance.now(); const movement=moveState[myId]; if(!movement) return;
     const me=getPredictedTail(myId); if(!me?.alive){ delete moveState[myId]; return; }
-    const evaluated=evalMove(movement,now),dx=evaluated.x-movement.lastX,dy=evaluated.y-movement.lastY;
+    const evaluated=evalMove(movement,now),dx=evaluated.x-movement.sampleX,dy=evaluated.y-movement.sampleY;
     tracePosition('move:sample',{now});
     const shouldEmit=evaluated.finished?(Math.abs(dx)>1e-6||Math.abs(dy)>1e-6):(Math.abs(dx)>.05||Math.abs(dy)>.05);
     if(shouldEmit){
         tracePosition('move:emit-before',{force:true,now,extra:`delta=${dx.toFixed(3)},${dy.toFixed(3)}`});
         executeLocal(makeMoveCommand(dx,dy));
+        movement.sampleX=evaluated.x; movement.sampleY=evaluated.y;
         const tail=getPredictedTail(myId);
         if(tail){ movement.lastX=tail.x; movement.lastY=tail.y; }
-        else{ movement.lastX=evaluated.x; movement.lastY=evaluated.y; }
         tracePosition('move:emit-after',{force:true,now});
     }
     if(evaluated.finished){
         // 최종 보간점까지 반드시 chain에 반영된 뒤 렌더 source를 predicted state로 넘긴다.
         tracePosition('move:finish-before',{force:true,now});
         flushActiveMoveToNow(now);
+        for(let i=0;i<8;i++){ const tail=getPredictedTail(myId); if(!tail) break; const dx=movement.targetX-tail.x,dy=movement.targetY-tail.y; if(Math.hypot(dx,dy)<=0.01) break; executeLocal(makeMoveCommand(dx,dy)); }
         delete moveState[myId];
+        queueLocalRenderTarget(getPredictedTail(myId));
         tracePosition('move:finish-after',{force:true,now});
     }
 }
