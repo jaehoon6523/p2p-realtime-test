@@ -2,7 +2,7 @@
 "name": "p2p-mmo-signaling",
 "version": "0.1.0",
 "description": "PSSF v4 sparse-topology signaling server with optional server-side bots",
-"main": "start-v4.js",
+"main": "start.js",
 "scripts": {
 "start": "node start.js",
 "start:signal": "node signaling-server.js",
