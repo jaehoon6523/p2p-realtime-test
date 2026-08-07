@@ -1,12 +1,10 @@
 {
   "name": "p2p-mmo-signaling",
-  "version": "0.5.0",
-  "description": "PSSF v5 transport-aware sparse signaling with optional server bots",
-  "main": "start.js",
+  "version": "0.5.1",
+  "description": "PSSF sparse signaling server for browser-native manual/auto peers",
+  "main": "signaling-server.js",
   "scripts": {
-    "start": "node start.js",
-    "start:signal": "node signaling-server.js",
-    "start:bots": "node server-bots/bot-runner.js"
+    "start": "node signaling-server.js"
   },
   "dependencies": {
     "ws": "^8.18.0"
