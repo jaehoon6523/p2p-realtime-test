@@ -4,22 +4,33 @@ const { BotPeer } = require('./bot-peer');
 
 const SIGNAL_URL=process.env.SIGNAL_URL||'ws://127.0.0.1:8090';
 const ROOM_ID=process.env.ROOM_ID||'test1';
-const BOT_COUNT=Math.max(1,Math.min(60,Number(process.env.BOT_COUNT)||3));
+const BOT_COUNT=Math.max(1,Math.min(1000,Number(process.env.BOT_COUNT)||3));
 const BOT_VERBOSE=process.env.BOT_VERBOSE==='1';
-const COMMITTEE_SIZE=Math.max(1,Math.min(7,Number(process.env.COMMITTEE_SIZE)||3));
+const JOIN_GAP_MS=Math.max(10,Math.min(1000,Number(process.env.BOT_JOIN_GAP_MS)||60));
+const SETTLE_TIMEOUT_MS=Math.max(1000,Math.min(30000,Number(process.env.BOT_SETTLE_TIMEOUT_MS)||8000));
 const bots=[];
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
 
 async function main(){
-  console.log(`[bot-runner] room=${ROOM_ID} bots=${BOT_COUNT} signal=${SIGNAL_URL}`);
-  if(BOT_COUNT>20) console.warn('[bot-runner] 현재 브라우저 프로토콜이 membershipIds<=64라 큰 수는 full-mesh 부하가 급격히 커집니다. 봇 자체가 서버를 잡아먹는 인간적인 광경이 펼쳐질 수 있습니다.');
+  console.log(`[bot-runner:v4] JOIN phase room=${ROOM_ID} bots=${BOT_COUNT} signal=${SIGNAL_URL}`);
   for(let i=0;i<BOT_COUNT;i++){
-    const id=`BOT-${String(i+1).padStart(3,'0')}`;
-    const bot=new BotPeer({id,signalUrl:SIGNAL_URL,room:ROOM_ID,committeeSize:COMMITTEE_SIZE,verbose:BOT_VERBOSE}); bots.push(bot);
+    const id=`BOT-${String(i+1).padStart(4,'0')}`;
+    const bot=new BotPeer({id,signalUrl:SIGNAL_URL,room:ROOM_ID,verbose:BOT_VERBOSE}); bots.push(bot);
     await bot.start();
-    console.log(`[bot-runner] joined ${id}`);
-    await new Promise(r=>setTimeout(r,120));
+    console.log(`[bot-runner:v4] joined ${i+1}/${BOT_COUNT} ${id} assignment=${bot.protocol.selfPolicy?.assignmentId||'-'} direct=${bot.desiredDirectPeers.size}`);
+    if(i+1<BOT_COUNT) await wait(JOIN_GAP_MS);
   }
+  console.log('[bot-runner:v4] SETTLE phase');
+  const deadline=Date.now()+SETTLE_TIMEOUT_MS;
+  while(Date.now()<deadline){
+    const ready=bots.filter(b=>b.isStable()).length;
+    if(ready===bots.length) break;
+    await wait(250);
+  }
+  const ready=bots.filter(b=>b.isStable()).length;
+  console.log(`[bot-runner:v4] RUN phase topology ready=${ready}/${bots.length}`);
+  for(const bot of bots) bot.enableAI();
 }
-async function shutdown(){ console.log('\n[bot-runner] stopping'); await Promise.allSettled(bots.map(b=>b.stop())); process.exit(0); }
+async function shutdown(){ console.log('\n[bot-runner:v4] stopping'); await Promise.allSettled(bots.map(b=>b.stop())); process.exit(0); }
 process.on('SIGINT',shutdown); process.on('SIGTERM',shutdown);
-main().catch(error=>{ console.error('[bot-runner] fatal:',error.stack||error.message); process.exit(1); });
+main().catch(error=>{ console.error('[bot-runner:v4] fatal:',error.stack||error.message); process.exit(1); });
