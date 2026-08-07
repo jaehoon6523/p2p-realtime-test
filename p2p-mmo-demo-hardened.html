@@ -127,7 +127,7 @@ aside{width:430px}
             <div class="overlayTitle">Kill Feed</div>
             <div id="killFeedRows"><div class="killEmpty">아직 처치 기록 없음</div></div>
         </div>
-        <div id="hint">좌클릭: 사격 · 우클릭: 목적지 이동 · 방향키: 즉시 이동 · 원은 AOI 범위 · 3회 피격 시 사망 · 5초 뒤 리스폰 · 1초 정지마다 체력 회복</div>
+        <div id="hint">좌클릭: 사격 · 우클릭: 이동 · 방향키: 즉시 이동 · 보라색 DODGE 봇: 랜덤 ping + 선딜 조준 공격 · 경고 원에서 벗어나면 회피</div>
     </div>
     <aside>
     <div class="consoleTabs">
@@ -201,6 +201,7 @@ const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
 const AOI_RADIUS = clampNumber(params.get('aoi'), 260, 120, 1400);
 const COMMITTEE_SIZE = Math.round(clampNumber(params.get('committee'), 3, 1, 7));
+const TRAINER_COUNT = Math.round(clampNumber(params.get('trainer'), 3, 0, 6));
 const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
 // 모든 피어가 공유하는 논리 월드. 브라우저/canvas 크기는 렌더 viewport일 뿐 게임 경계가 아니다.
@@ -220,6 +221,15 @@ const MAX_HP = 3;
 const RESPAWN_MS = 5000;
 const REGEN_INTERVAL_TICKS = 30;
 const BULLET_TRAIL_MS = 160;
+const TRAINER_MIN_PING_MS = 25;
+const TRAINER_MAX_PING_MS = 190;
+const TRAINER_WINDUP_MIN_MS = 650;
+const TRAINER_WINDUP_MAX_MS = 950;
+const TRAINER_HIT_RADIUS = 18;
+const TRAINER_MIN_ORBIT = 150;
+const TRAINER_MAX_ORBIT = 285;
+const TRAINER_FIRE_GAP_MIN_MS = 900;
+const TRAINER_FIRE_GAP_MAX_MS = 1650;
 const MOVE_SPEED = 220;
 const MOVE_ACCEL = 620;
 const MOVE_DECEL = 560;
@@ -285,6 +295,9 @@ const remoteRenderState = Object.create(null); // remote authoritative interpola
 const relayWorld = new Map(); // discovery-only 1.5-hop summaries; never authoritative
 const seenRelayRecords = new Map();
 const bullets = [];
+const trainerBots = [];
+const trainerShots = [];
+let trainerHits = 0, trainerDodges = 0;
 const hitFlashes = Object.create(null);
 const pendingById = new Map();
 const pendingOrderByPlayer = new Map();
@@ -827,6 +840,106 @@ function onRespawnCommitted(command,state){
 }
 
 function spawnBullet(command){ bullets.push({x1:command.originX,y1:command.originY,x2:command.originX+command.dirX*MAX_RANGE,y2:command.originY+command.dirY*MAX_RANGE,born:performance.now(),color:visibleWorld[command.playerId]?.color||'#fff'}); }
+
+// ===== Local dodge trainer =====
+// P2P membership/authority에는 넣지 않는다. 이동 응답성과 회피 감각을 확인하는 로컬 테스트 하네스다.
+function trainerRand(min,max){ return min+Math.random()*(max-min); }
+function trainerPointAround(center,minR=TRAINER_MIN_ORBIT,maxR=TRAINER_MAX_ORBIT){
+    const a=Math.random()*Math.PI*2,r=trainerRand(minR,maxR);
+    return clampWorldPoint(center.x+Math.cos(a)*r,center.y+Math.sin(a)*r);
+}
+function trainerCurrentPosition(bot,now=performance.now()){
+    if(bot.attack) return {x:bot.x,y:bot.y}; // 선딜 중에는 멈춰서 읽을 수 있게 한다.
+    const t=Math.max(0,Math.min(1,(now-bot.moveStart)/Math.max(1,bot.moveDuration)));
+    const eased=t*t*(3-2*t);
+    return {x:bot.fromX+(bot.toX-bot.fromX)*eased,y:bot.fromY+(bot.toY-bot.fromY)*eased};
+}
+function trainerChooseMove(bot,now,me){
+    const cur=trainerCurrentPosition(bot,now);
+    const next=trainerPointAround(me);
+    bot.x=cur.x; bot.y=cur.y;
+    bot.fromX=cur.x; bot.fromY=cur.y; bot.toX=next.x; bot.toY=next.y;
+    bot.moveStart=now+bot.pingMs*.35;
+    bot.moveDuration=trainerRand(700,1300)+bot.pingMs;
+}
+function initTrainerBots(){
+    if(TRAINER_COUNT<=0||trainerBots.length) return;
+    const me=getPredictedTail(myId)||visibleWorld[myId]; if(!me) return;
+    const now=performance.now();
+    for(let i=0;i<TRAINER_COUNT;i++){
+        const start=trainerPointAround(me,170,260),next=trainerPointAround(me);
+        trainerBots.push({id:`DODGE-${i+1}`,x:start.x,y:start.y,fromX:start.x,fromY:start.y,toX:next.x,toY:next.y,moveStart:now,moveDuration:trainerRand(700,1300),pingMs:Math.round(trainerRand(TRAINER_MIN_PING_MS,TRAINER_MAX_PING_MS)),nextPingAt:now+trainerRand(1500,3500),nextAttackAt:now+trainerRand(800,1800),attack:null,flashUntil:0});
+    }
+    log('t-sys',`dodge trainer enabled bots=${TRAINER_COUNT} windup=${TRAINER_WINDUP_MIN_MS}-${TRAINER_WINDUP_MAX_MS}ms ping=${TRAINER_MIN_PING_MS}-${TRAINER_MAX_PING_MS}ms`);
+}
+function tickTrainer(){
+    if(!roomReady||TRAINER_COUNT<=0) return;
+    initTrainerBots();
+    const me=getRenderPosition(myId)||getPredictedTail(myId); if(!me) return;
+    const now=performance.now();
+    for(const bot of trainerBots){
+        if(now>=bot.nextPingAt){ bot.pingMs=Math.round(trainerRand(TRAINER_MIN_PING_MS,TRAINER_MAX_PING_MS)); bot.nextPingAt=now+trainerRand(1600,3800); }
+        if(!bot.attack){
+            const cur=trainerCurrentPosition(bot,now); bot.x=cur.x; bot.y=cur.y;
+            if(now>=bot.moveStart+bot.moveDuration) trainerChooseMove(bot,now,me);
+            if(now>=bot.nextAttackAt){
+                // 조준점은 선딜 시작 순간에 고정한다. 이후 플레이어를 추적하지 않으므로 집중하면 피할 수 있다.
+                const jitterRadius=Math.random()<.72?trainerRand(0,9):trainerRand(12,34);
+                const jitterAngle=Math.random()*Math.PI*2;
+                const aim=clampWorldPoint(me.x+Math.cos(jitterAngle)*jitterRadius,me.y+Math.sin(jitterAngle)*jitterRadius);
+                const windup=Math.round(trainerRand(TRAINER_WINDUP_MIN_MS,TRAINER_WINDUP_MAX_MS));
+                bot.attack={startedAt:now,fireAt:now+windup+bot.pingMs,targetX:aim.x,targetY:aim.y,originX:bot.x,originY:bot.y,windupMs:windup};
+                bot.x=bot.attack.originX; bot.y=bot.attack.originY;
+                log('t-cmd',`TRAINER aim ${bot.id} ping=${bot.pingMs}ms windup=${windup}ms target=${aim.x.toFixed(0)},${aim.y.toFixed(0)}`);
+            }
+        }else if(now>=bot.attack.fireAt){
+            const a=bot.attack;
+            const player=getRenderPosition(myId)||getPredictedTail(myId);
+            const miss=player?Math.hypot(player.x-a.targetX,player.y-a.targetY):Infinity;
+            const hit=miss<=TRAINER_HIT_RADIUS;
+            if(hit){ trainerHits++; hitFlashes[myId]=now+180; }
+            else trainerDodges++;
+            trainerShots.push({x1:a.originX,y1:a.originY,x2:a.targetX,y2:a.targetY,born:now,hit});
+            log(hit?'t-warn':'t-audit',`TRAINER ${hit?'HIT':'DODGE'} ${bot.id} miss=${miss.toFixed(1)} ping=${bot.pingMs}ms`);
+            bot.flashUntil=now+160;
+            bot.attack=null;
+            bot.nextAttackAt=now+trainerRand(TRAINER_FIRE_GAP_MIN_MS,TRAINER_FIRE_GAP_MAX_MS)+bot.pingMs;
+            trainerChooseMove(bot,now,me);
+        }
+    }
+}
+function drawTrainer(now){
+    for(let i=trainerShots.length-1;i>=0;i--){
+        const shot=trainerShots[i],age=now-shot.born;
+        if(age>220){ trainerShots.splice(i,1); continue; }
+        context.save(); context.globalAlpha=1-age/220; context.strokeStyle=shot.hit?'#ef5b6e':'#7aa5ff'; context.lineWidth=2.2;
+        context.beginPath(); context.moveTo(shot.x1,shot.y1); context.lineTo(shot.x2,shot.y2); context.stroke(); context.restore();
+    }
+    for(const bot of trainerBots){
+        const p=trainerCurrentPosition(bot,now); bot.x=p.x; bot.y=p.y;
+        if(bot.attack){
+            const a=bot.attack,total=Math.max(1,a.fireAt-a.startedAt),progress=Math.max(0,Math.min(1,(now-a.startedAt)/total));
+            const remain=Math.max(0,a.fireAt-now);
+            context.save();
+            context.setLineDash([6,5]); context.strokeStyle=progress>.72?'rgba(239,91,110,.95)':'rgba(242,169,59,.72)'; context.lineWidth=1.7;
+            context.beginPath(); context.moveTo(a.originX,a.originY); context.lineTo(a.targetX,a.targetY); context.stroke(); context.setLineDash([]);
+            const pulse=TRAINER_HIT_RADIUS+10*(1-progress);
+            context.beginPath(); context.arc(a.targetX,a.targetY,pulse,0,Math.PI*2); context.strokeStyle=progress>.72?'rgba(239,91,110,.95)':'rgba(242,169,59,.82)'; context.lineWidth=2; context.stroke();
+            context.font='10px monospace'; context.fillStyle=progress>.72?'#ef5b6e':'#f2a93b'; context.fillText(`${Math.ceil(remain)}ms`,a.targetX+22,a.targetY-8);
+            context.restore();
+        }
+        context.save();
+        context.beginPath(); context.arc(p.x,p.y,8,0,Math.PI*2); context.fillStyle=now<bot.flashUntil?'#fff':'#c77dff'; context.fill();
+        context.lineWidth=1.5; context.strokeStyle=bot.attack?'#f2a93b':'#7aa5ff'; context.stroke();
+        context.font='9px monospace'; context.fillStyle='#aeb9c1'; context.fillText(`${bot.id} ${bot.pingMs}ms`,p.x+11,p.y+3);
+        context.restore();
+    }
+    if(TRAINER_COUNT>0){
+        context.save(); context.font='11px monospace'; context.fillStyle='rgba(201,214,224,.88)';
+        context.fillText(`DODGE TRAINER  hit ${trainerHits} / dodge ${trainerDodges}`,18,WORLD_HEIGHT-18); context.restore();
+    }
+}
+
 function buildMoveProfile(distance,startSpeed){
     const d=Math.max(0,distance);
     const v0=Math.max(0,startSpeed);
@@ -1195,6 +1308,7 @@ function draw(){
     beginWorldFrame(); const now=performance.now();
     const localRender=getRenderPosition(myId); if(localRender){ context.beginPath(); context.arc(localRender.x,localRender.y,AOI_RADIUS,0,Math.PI*2); context.strokeStyle='rgba(61,220,151,.32)'; context.lineWidth=1.5; context.setLineDash([6,6]); context.stroke(); context.setLineDash([]); }
     for(let i=bullets.length-1;i>=0;i--){ const bullet=bullets[i],age=now-bullet.born; if(age>BULLET_TRAIL_MS){ bullets.splice(i,1); continue; } context.globalAlpha=1-age/BULLET_TRAIL_MS; context.strokeStyle=bullet.color; context.lineWidth=1.5; context.beginPath(); context.moveTo(bullet.x1,bullet.y1); context.lineTo(bullet.x2,bullet.y2); context.stroke(); context.globalAlpha=1; }
+    drawTrainer(now);
     // 1.5-hop 상태는 발견/사전 로딩용 유령 표시일 뿐, 전투 판정에는 절대 들어가지 않는다.
     const localState=visibleWorld[myId];
     for(const entry of relayWorld.values()){
@@ -1265,6 +1379,7 @@ window.addEventListener('pagehide',shutdown); window.addEventListener('beforeunl
 
 setInterval(tickMovement,STEP_INTERVAL_MS);
 setInterval(tickCombat,100);
+setInterval(tickTrainer,50);
 setInterval(renderLogs,150);
 setInterval(updateKda,1000);
 setInterval(()=>{ pruneRelayWorld(); broadcastNeighborDigests(); },RELAY_INTERVAL_MS);
