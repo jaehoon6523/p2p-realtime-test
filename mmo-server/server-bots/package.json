@@ -1,0 +1,10 @@
+{
+  "name": "pssf-server-bots-v4",
+  "private": true,
+  "version": "4.0.0",
+  "description": "Optional server-side WebRTC load/game bots for PSSF v13 / signaling v4",
+  "dependencies": {
+    "werift": "*",
+    "ws": "^8.18.0"
+  }
+}
