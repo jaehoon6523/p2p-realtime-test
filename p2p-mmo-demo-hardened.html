@@ -127,7 +127,7 @@ aside{width:430px}
             <div class="overlayTitle">Kill Feed</div>
             <div id="killFeedRows"><div class="killEmpty">아직 처치 기록 없음</div></div>
         </div>
-        <div id="hint">좌클릭: 사격 · 우클릭: 이동 · 방향키: 즉시 이동 · 보라색 DODGE 봇: 랜덤 ping + 선딜 조준 공격 · 경고 원에서 벗어나면 회피</div>
+        <div id="hint">좌클릭: 사격 · 우클릭: 목적지 이동 · 방향키: 즉시 이동 · 원은 AOI 범위 · 3회 피격 시 사망 · 5초 뒤 리스폰 · 1초 정지마다 체력 회복</div>
     </div>
     <aside>
     <div class="consoleTabs">
@@ -141,7 +141,7 @@ aside{width:430px}
         <div class="block"><h2>Local Peer</h2><div class="row"><span>id</span><span id="peerId">-</span></div><div class="row"><span>connections</span><span id="connCount">0</span></div><div class="row"><span>membership</span><span id="membershipVersion">0</span></div><div class="row"><span>status</span><span id="localStatus">alive</span></div></div>
         <div class="block"><h2>Signaling</h2><div class="row"><span>room</span><span id="signalRoom">-</span></div><div class="row"><span>state</span><span id="signalState" data-state="closed">idle</span></div><button style="width:100%;margin-top:6px" onclick="reconnectSignaling()">reconnect signaling</button></div>
         <div class="block"><h2>Connected Peers</h2><div id="peerList"><span style="color:var(--dim)">다른 유저 대기 중...</span></div></div>
-        <div class="block"><h2>Protocol State</h2><div class="row"><span>epoch</span><span id="epochStat">-</span></div><div class="row"><span>AOI peers</span><span id="aoiPeerStat">0</span></div><div class="row"><span>committee</span><span id="committeeStat">-</span></div><div class="row"><span>confirmed</span><span id="confirmedStat">0</span></div><div class="row"><span>tentative</span><span id="tentativeStat">0</span></div><div class="row"><span>rejected</span><span id="rejectedStat">0</span></div><div class="row"><span>stalled</span><span id="stalledStat">0</span></div><div class="row"><span>membership mismatch</span><span id="membershipMismatchStat">0</span></div><div class="row"><span>1.5-hop relay</span><span id="relayStat">0 / 0</span></div></div>
+        <div class="block"><h2>Protocol State</h2><div class="row"><span>epoch</span><span id="epochStat">-</span></div><div class="row"><span>AOI peers</span><span id="aoiPeerStat">0</span></div><div class="row"><span>committee</span><span id="committeeStat">-</span></div><div class="row"><span>confirmed</span><span id="confirmedStat">0</span></div><div class="row"><span>tentative</span><span id="tentativeStat">0</span></div><div class="row"><span>rejected</span><span id="rejectedStat">0</span></div><div class="row"><span>stalled</span><span id="stalledStat">0</span></div><div class="row"><span>assignment mismatch</span><span id="membershipMismatchStat">0</span></div><div class="row"><span>1.5-hop relay</span><span id="relayStat">0 / 0</span></div></div>
         <div class="block"><h2>Network Metrics</h2><div class="row"><span>tx / rx</span><span id="trafficStat">0 / 0 KB</span></div><div class="row"><span>msg/sec</span><span id="messageRateStat">0 / 0</span></div><div class="row"><span>avg commit</span><span id="commitLatencyStat">-</span></div><div class="row"><span>shoot checkpoint</span><span id="checkpointStat">0 players</span></div><div class="row"><span>relay rx / drop</span><span id="relayMetricStat">0 / 0</span></div><div class="row"><span>identity trust</span><span style="color:var(--warn)">self-issued runtime</span></div></div>
         <div class="block" style="padding-bottom:8px"><h2>Legend</h2><div class="legend"><span>white ring: local</span><span>orange ring: pending</span><span>green circle: AOI</span><span>blue dash: relay</span><span>gray: dead</span></div></div>
     </div>
@@ -156,7 +156,7 @@ aside{width:430px}
 <script>
 'use strict';
 
-const PSSF_GUI_DATA = {"modules":[{"plane":"Identity / Trust","name":"Membership","status":"contracted","note":"세션 참가/재접속/이탈에서 room, membership_epoch, peer_identity가 직접 계약됨."},{"plane":"Identity / Trust","name":"Trust Policy","status":"partial","note":"role_class/trust_policy_assignment은 존재하지만 CanRelay/CanSkip/CanValidate 정책 계산은 미정."},{"plane":"Network","name":"Topology","status":"partial","note":"topology_initialized/topology_state는 있으나 near/skip/dynamic AOI peer 선정 계약은 없음."},{"plane":"Network","name":"Discovery","status":"design","note":"1.5-hop/skip discovery는 런타임 데모 개념에는 있으나 업로드 UX/IO 계약에는 없음."},{"plane":"Network","name":"Information Exposure","status":"design","note":"Spatial/Trust/Role/Event 기반 DataScope 정책은 아직 설계 개념."},{"plane":"Network","name":"State Distribution","status":"partial","note":"실시간 데모 전파는 존재하지만 계약 산출물은 provider/consumer 수준으로 미분해."},{"plane":"Simulation / Ordering","name":"Local Simulation","status":"contracted","note":"이동 local_position/local_velocity 및 전투 speculative 결과 계약 존재."},{"plane":"Simulation / Ordering","name":"Event Ordering","status":"partial","note":"event_id/actor_sequence/life_id와 event_ordering_state는 있으나 dependency[] 계약은 없음."},{"plane":"Simulation / Ordering","name":"History Commitment","status":"partial","note":"history_commitment_state는 존재하지만 prevHash/payloadHash/eventHash 구조는 없음."},{"plane":"Anchor / Evidence","name":"Server Anchor","status":"partial","note":"재접속에서 anchor 복원을 요구하지만 Anchor DTO(stateHash/historyRoot/signature)는 없음."},{"plane":"Anchor / Evidence","name":"Event Evidence","status":"partial","note":"전투 UX 설명에는 Evidence 경로가 있으나 최소 Evidence 필드 계약은 없음."},{"plane":"Verification","name":"Validator Assignment","status":"design","note":"UX 설명에는 Validator Assignment가 있으나 별도 입력/출력 계약 없음."},{"plane":"Verification","name":"Structural Validation","status":"contracted","note":"검증 결과 및 Protocol Fault 신고에서 structural result가 직접 사용됨."},{"plane":"Verification","name":"Causal Validation","status":"contracted","note":"이벤트 검증 결과에 causal_validation_result가 직접 계약됨."},{"plane":"Verification","name":"Deterministic Verification","status":"contracted","note":"이벤트 검증 결과에 deterministic_verification_result가 직접 계약됨."},{"plane":"Verification","name":"Quorum Certificate","status":"contracted","note":"quorum_certificate_summary/state가 검증 조회 계약에 존재."},{"plane":"Finality","name":"Finality Policy","status":"partial","note":"finality_level/finality_level_gate는 있으나 EventClass→Requirement 정책 계약은 없음."},{"plane":"Finality","name":"Server Finalization","status":"contracted","note":"canonical_result/finalization timestamp/state 조회 계약 존재."},{"plane":"Finality","name":"Persistence / Economy","status":"contracted","note":"reward claim 및 L4 currency/inventory/ownership/rank 서버 권위 계약 존재."}],"contracts":[{"id":"CONTRACT-000","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-000","intent":"유효한 room_id를 대상으로 join_session을 실행하여 Membership epoch 신규 발급, MembershipContext 생성, Trust Policy 역할 배정, topology 초기화를 수행하고 세션 내부 진입 상태를 확정한다.","method":"POST","path":"/peer-simulated-server/join-session","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model000","transition":"입력 상태(membership_context=none, trust_policy_assignment=unassigned, topology_initialized=false) → 성공 시: membership_context=active, trust_policy_assignment=assigned, topology_initialized=true, action_state=approved. MEMBERSHIP_CONTEXT_ALREADY_ACTIVE 실패 시: 모든 상태값 unchanged, action_state=retry. ROOM_NOT_FOUND 실패 시: 모든 상태값 unchanged, action_state=retry.","successFields":["room_id","membership_epoch","peer_identity","role_class","session_status"],"failure":"Enum(MEMBERSHIP_CONTEXT_ALREADY_ACTIVE|ROOM_NOT_FOUND)"},{"id":"CONTRACT-001","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-001","intent":"기존 세션 식별 정보(room_id, membership_epoch, peer_identity, last_committed_sequence, life_id)를 확인하고, 해당 식별 정보로 재접속을 요청하여 committed history와 anchor를 복원한다.","method":"POST","path":"/reconnect","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model001","transition":"STEP-000: local_session_state=present → reconnect_button_active=true / local_session_state=absent|incomplete → reconnect_button_active=false. STEP-001: 요청 제출 시 reconnect_button_loading=true. 성공 시 action_state=approved, membership_context=epoch_reentered, history_commitment_state=restored, server_anchor_last=restored. MEMBERSHIP_EPOCH_MISMATCH|LIFE_ID_MISMATCH|NO_COMMITTED_SEQUENCE 시 action_state=quit, 관련 state 변경 없음. NETWORK_ERROR 시 action_state=retry.","successFields":["reconnect_result"],"failure":"Enum(MEMBERSHIP_EPOCH_MISMATCH|LIFE_ID_MISMATCH|NO_COMMITTED_SEQUENCE|NETWORK_ERROR|SESSION_ABSENT|SESSION_INCOMPLETE)"},{"id":"CONTRACT-002","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","intent":"이탈 의사 입력(메뉴 또는 단축키) 트리거를 수신하여 이탈 확인 다이얼로그를 표시하고, pending_finalization_warning 존재 여부에 따라 경고를 함께 노출한다.","method":"INPUT","path":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model002","transition":"트리거 인식 성공 시 dialog_state = open. pending_finalization_warning 존재 시 경고 포함 다이얼로그 표시. 인식 실패 시 dialog_state = closed 유지, action_state = retry.","successFields":["room_id","membership_epoch","pending_finalization_warning","_state"],"failure":"Enum(trigger_recognition_failed)"},{"id":"CONTRACT-003","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","intent":"이탈 확인 제출을 처리하여 membership_context에 Leave를 기록하고, membership_epoch를 이탈 시점으로 갱신하며, topology_state에서 해당 peer를 제거한 재구성 결과를 반영한다.","method":"POST","path":"/peer/simulated-server/finalized","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model003","transition":"Leave 기록 및 topology 재구성 성공 시 membership_context = left, topology_state = stable(재구성 완료), action_state = approved. 실패 시 membership_context·topology_state 원상 유지, action_state = retry.","successFields":["room_id","membership_epoch","_state"],"failure":"Enum(leave_record_failed|topology_reconfiguration_failed)"},{"id":"CONTRACT-004","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","intent":"이탈 확인 취소를 처리하여 다이얼로그를 닫고 membership_context·membership_epoch·topology_state를 이탈 의사 입력 이전 상태 그대로 유지한다.","method":"INPUT","path":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model004","transition":"취소 시 dialog_state = closed. membership_context·membership_epoch·topology_state 모두 unchanged. action_state = quit (leave_session 미완료).","successFields":["membership_epoch","_state"],"failure":"Enum()"},{"id":"CONTRACT-005","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-003","intent":"비-영 방향 이동 입력을 받아 로컬 시뮬레이션을 즉시 실행하고, local_position·local_velocity·actor_sequence를 갱신하며 speculative_render_state를 SPECULATIVE로 설정한다.","method":"LOCAL_SIMULATION","path":"/peer/simulated/movement","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model005","transition":"local_simulation_state=active AND life_id 일치 AND direction≠(0,0) → local_position·local_velocity 갱신, speculative_render_state=SPECULATIVE, actor_sequence+1. 그 외 조건 불충족 시 모든 상태 유지.","successFields":["local_position","local_velocity","_state"],"failure":"Enum(ZERO_MOVEMENT_INPUT_REJECTED|LIFE_ID_MISMATCH_REJECTED|SIMULATION_INACTIVE_REJECTED)"},{"id":"CONTRACT-006","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","intent":"전투 행동의 종류(action_type)와 대상(target_id)을 선택·지정하여 행동 확정 가능 상태를 구성한다","method":"INPUT","path":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model006","transition":"target_id 지정 완료 시 confirm_button_state → active; target_id 미지정(MISSING_ACTION_TARGET) 시 confirm_button_state → inactive 유지","successFields":["action_type","target_id","_state"],"failure":"Enum(MISSING_ACTION_TARGET)"},{"id":"CONTRACT-007","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","intent":"지정된 action_type과 target_id로 전투 행동을 확정 실행하여 로컬 시뮬레이션 낙관적 결과를 즉시 렌더링하고 상태를 전환한다","method":"ACTION","path":"/peer-simulated-server/finalized/combat-action","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model007","transition":"local_simulation_state=READY 이면 input_combat_action 실행 후 → local_simulation_state=PROCESSING, event_ordering_state=EVENT_INCLUDED, history_commitment_state=PENDING, optimistic_result_status=SPECULATIVE; local_simulation_state≠READY 이면 모든 상태 unchanged, error_reason=LOCAL_SIMULATION_NOT_READY","successFields":["action_type","target_id","speculative_hit_result","event_id","actor_sequence","life_id","_state"],"failure":"String"},{"id":"CONTRACT-008","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","intent":"외부 검증 경로(Audit/Trust path)로부터 수신한 VERIFIED 또는 INVALIDATED 신호에 따라 낙관적 결과 표시 상태와 커밋 상태를 최종 갱신한다","method":"EVENT","path":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model008","transition":"verification_signal=VERIFIED 시 → optimistic_result_status=VERIFIED, history_commitment_state=COMMITTED, local_simulation_state=COMPLETED, event_ordering_state 유지, event_id·actor_sequence·life_id 유지; verification_signal=INVALIDATED 시 → optimistic_result_status=INVALIDATED, history_commitment_state=FAILED, event_ordering_state=EVENT_REMOVED, local_simulation_state=ROLLBACK","successFields":["event_id","actor_sequence","life_id","speculative_hit_result","_state"],"failure":"Enum(SIGNAL_NOT_APPLICABLE)"},{"id":"CONTRACT-009","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-005","intent":"낙관적 실행 중인 액터의 Speculative(미검증) 상태 값을 로컬 시뮬레이션 상태로부터 읽어 상태 패널에 표시한다.","method":"READ","path":"local_simulation_state / actor","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model009","transition":"읽기 전용. local_simulation_state가 optimistic_active이면 actor_state를 출력하고 action_state=approved. not_active이면 actor_state 미출력, action_state=quit. 어떠한 상태 변화도 없다.","successFields":["actor_state"],"failure":"Enum(LOCAL_SIMULATION_NOT_ACTIVE)"},{"id":"CONTRACT-010","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-006","intent":"Audit/Trust path가 완료된 이벤트의 검증 결과(VERIFIED/INVALIDATED)를 목록에서 선택하여 quorum 인증서 요약, 개별 validation 결과, fault 분류, ruleset revision을 확인한다.","method":"GET","path":"/peer-simulated-server-finalized/events","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model010","transition":"목록 진입 시 list_load_state: loading → loaded | empty | error. 개별 이벤트 선택 시 detail_load_state: loading → loaded | error. loaded 시 view_event_verification_result: true. error 시 action_state: retry | quit.","successFields":["list","detail"],"failure":"Enum(list_load_failed|detail_load_failed|event_not_found)"},{"id":"CONTRACT-011","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-007","intent":"Server Finalization 이후 확정된 canonical 결과(finalized_event_id, finalized_event_class, canonical_result, server_finalization_timestamp, membership_epoch, finality_level)를 server_finalization_state 및 finality_level 기준에 따라 조건부 표시하는 읽기 흐름을 처리한다.","method":"READ","path":"server_finalization_state","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model011","transition":"결과 화면/전적 탭 진입 시 server_finalization_state 조회 → list_render_state: loaded|loading_failed. 항목 선택(view_finalized_result) 시 server_finalization_state + finality_level_gate 기준으로 detail_render_state: full(finalized, L3_or_above) | partial(finalized, below_L3) | non_finalized(non_finalized) 분기. 실패 시 action_state: retry|quit.","successFields":["step_000","step_001"],"failure":"Enum(NETWORK_ERROR|SERVER_ERROR|SERVER_FINALIZATION_NOT_COMPLETED|FINALIZATION_STATE_UNAVAILABLE)"},{"id":"CONTRACT-012","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-008","intent":"Server Finalization 완료 여부와 수령 자격을 확인한 뒤 보상 목록을 표시하고, 자격 충족 시 claim_reward를 실행하여 inventory/currency 상태를 영구 변경한다.","method":"COMMAND","path":"claim_reward","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model012","transition":"STEP-000: server_finalization_state=finalized & reward_eligibility_state=eligible → action_state=approved, claim_reward_available=true / server_finalization_state=not_finalized → action_state=quit, claim_reward_available=false / reward_eligibility_state=ineligible → action_state=quit, claim_reward_available=false / reward_eligibility_state=claimed → action_state=quit, claim_reward_available=false | STEP-001: claim_reward 실행 성공 → reward_eligibility_state=claimed, inventory_state=updated, currency_state=updated, action_state=approved / SERVER_FINALIZATION_INCOMPLETE → action_state=quit / REWARD_ELIGIBILITY_NOT_MET → action_state=quit / claimed 재시도 → inventory_state=unchanged, currency_state=unchanged, reward_eligibility_state=claimed / 네트워크·서버 오류 → action_state=retry, inventory_state=unchanged, currency_state=unchanged","successFields":["reward_type","reward_amount","reward_eligibility_proof","finalized_event_reference","inventory_preview","_effect"],"failure":"Enum(SERVER_FINALIZATION_INCOMPLETE|REWARD_ELIGIBILITY_NOT_MET|NETWORK_ERROR|SERVER_ERROR)"},{"id":"CONTRACT-013","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-009","intent":"인증된 사용자가 인벤토리/계정 상태 탭에 진입할 때 L4 Server Authoritative 경제 데이터(currency_balance, inventory_items, ownership_records, rank, match_result_history)를 읽기 전용으로 조회하여 표시한다.","method":"GET","path":"/economy/inventory","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model013","transition":"읽기 전용 조회. 로컬 상태 변경 없음. persistence_economy_state 유효 시 action_state=approved, 오류 시 action_state=retry.","successFields":["currency_balance","rank","inventory_items","ownership_records","match_result_history","_state","_effect"],"failure":"Enum(INVALID_PERSISTENCE_ECONOMY_STATE|NETWORK_ERROR|SERVER_ERROR)"},{"id":"CONTRACT-014","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-010","intent":"사용자가 의심 이벤트를 선택하고 EquivocationProof 또는 Protocol Fault 증거를 첨부하여 서버에 신고를 제출하는 흐름을 처리한다.","method":"POST","path":"/fault-report/submit","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model014","transition":"structural_validation_result=valid && trust_policy_state=active → submit_fault_report triggered → action_state=approved / structural_validation_result=invalid → submit_fault_report blocked → action_state=quit(이탈 허용) / trust_policy_state=inactive → submit_fault_report blocked → action_state=quit(이탈 허용) / NETWORK_ERROR → action_state=retry","successFields":["report"],"failure":"Enum(STRUCTURAL_VALIDATION_INVALID|TRUST_POLICY_INACTIVE|NETWORK_ERROR|EVENT_LOAD_ERROR)"}],"ux":[{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-000","name":"세션 참가","flow":["룸/세션 선택 또는 매치 수락","참가 요청 제출"],"reason":"별도 진입점. Membership epoch 신규 발급, MembershipContext 생성, Trust Policy 역할 배정이 발생하여 인증·상태 변화 있음. 재접속(epoch 재진입)과 결과 화면 다름","display":["room_id","membership_epoch","peer_identity","role_class","session_status"],"state":["membership_context","trust_policy_assignment","topology_initialized"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-001","name":"세션 재접속","flow":["기존 세션 식별 정보 확인","재접속 요청 제출"],"reason":"별도 진입점. 기존 Membership epoch에 재진입하며 actorSequence 연속성·lifeId 유지 검증이 필요. 신규 참가와 달리 기존 committed history와 anchor 복원 흐름이 다름","display":["room_id","membership_epoch","peer_identity","last_committed_sequence","life_id"],"state":["membership_context","history_commitment_state","server_anchor_last"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","name":"세션 이탈","flow":["이탈 의사 입력(메뉴 또는 단축키)","이탈 확인 제출"],"reason":"별도 진입점. Membership epoch에서 Leave 기록, 미확정 consequential event 처리 분기, Topology peer 재구성이 발생. 참가와 반대 방향 상태 변화","display":["room_id","membership_epoch","pending_finalization_warning"],"state":["membership_context","topology_state"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-003","name":"이동 입력","flow":["방향/이동 입력 제공"],"reason":"독립적 중단 가능. Local Simulation 즉시 실행 → Speculative 상태 렌더링. 전투 행동과 독립 흐름(Realtime path). 결과는 SPECULATIVE이며 anchor/commitment 경로는 별도","display":["local_position","local_velocity","speculative_render_state"],"state":["local_simulation_state","actor_sequence","life_id"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","name":"전투 행동 입력","flow":["전투 행동 입력 제공(공격/스킬 등)"],"reason":"독립적 중단 가능. Optimistic Execution으로 즉시 렌더링 후 Evidence 구성 → Audit/Trust path 진입. 이동 입력과 분리 이유: Event Evidence 생성, Validator Assignment, Structural/Causal/Deterministic 검증 경로가 추가로 분기됨. 결과가 SPECULATIVE → VERIFIED → FINALIZED 또는 INVALIDATED로 달라짐","display":["action_type","target_id","speculative_hit_result","event_id","actor_sequence","life_id"],"state":["local_simulation_state","event_ordering_state","history_commitment_state","optimistic_result_status"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-005","name":"Speculative 상태 조회","flow":["현재 게임 화면 내 상태 패널 확인"],"reason":"읽기 전용 흐름. 상태 변화 없음. Speculative(미검증) 값만 표시하며 Finalized 상태 조회와 결과 화면 다름. 낙관적 실행 중인 수치(HP, 위치 등)를 사용자가 직접 확인하는 독립 조회","display":["speculative_hp","speculative_position","speculative_combat_state","life_id","actor_sequence","speculative_label"],"state":["local_simulation_state"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-006","name":"이벤트 검증 결과 확인","flow":["이벤트 결과 알림 또는 이력 탭 진입","개별 이벤트 결과 선택"],"reason":"별도 진입점. Audit/Trust path 완료 후 VERIFIED/INVALIDATED 상태를 사용자가 확인하는 읽기 흐름. Speculative 조회와 결과 화면 다름(검증 완료 여부, fault 여부 포함). Finalized 조회와도 다름(Server Finalization 이전 단계)","display":["event_id","event_class","verification_status","quorum_certificate_summary","fault_classification","ruleset_revision"],"state":["quorum_certificate_state","structural_validation_result","causal_validation_result","deterministic_verification_result"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-007","name":"Finalized 결과 확인","flow":["결과 화면 또는 전적 탭 진입","확정 결과 항목 선택"],"reason":"별도 진입점. Server Finalization 이후 canonical 결과(사망, 매치 결과, 보상 자격 등 L3 이상)를 확인하는 읽기 흐름. 검증 결과 확인과 결과 화면 다름(canonical 확정 여부, consequential state 포함)","display":["finalized_event_id","finalized_event_class","canonical_result","server_finalization_timestamp","membership_epoch","finality_level"],"state":["server_finalization_state"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-008","name":"보상 수령","flow":["보상 목록 확인","수령 요청 제출"],"reason":"별도 진입점. L3/L4 수준 Server Finalization 완료 후에만 가능. 수령 즉시 Persistence/Economy에 account/inventory 상태 변화 발생. 단순 조회와 달리 영구 상태 변경","display":["reward_type","reward_amount","reward_eligibility_proof","finalized_event_reference","inventory_preview"],"state":["reward_eligibility_state","server_finalization_state","inventory_state","currency_state"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-009","name":"경제/인벤토리 조회","flow":["인벤토리 또는 계정 상태 탭 진입"],"reason":"읽기 전용 흐름. 상태 변화 없음. L4 Server Authoritative 데이터만 표시. peer authority 없음. 보상 수령·거래와 독립적 진입점","display":["currency_balance","inventory_items","ownership_records","rank","match_result_history"],"state":["persistence_economy_state"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-010","name":"Protocol Fault 신고","flow":["의심 이벤트 선택","신고 증거 첨부 및 제출"],"reason":"별도 진입점. EquivocationProof 또는 Protocol Fault 증거를 사용자가 명시적으로 서버에 제출하는 흐름. 단순 조회나 게임플레이 행동과 결과 화면 다름. Trust Policy 입력으로 연결될 수 있는 독립 중단 가능 흐름","display":["suspected_event_id","equivocation_proof_summary","fault_classification","actor_id","life_id","sequence"],"state":["structural_validation_result","trust_policy_state"]}]};
+const PSSF_GUI_DATA = {"modules":[{"plane":"Identity / Trust","name":"Membership","status":"contracted","note":"세션 참가/재접속/이탈에서 room, membership_epoch, peer_identity가 직접 계약됨."},{"plane":"Identity / Trust","name":"Trust Policy","status":"partial","note":"role_class/trust_policy_assignment은 존재하지만 CanRelay/CanSkip/CanValidate 정책 계산은 미정."},{"plane":"Network","name":"Topology","status":"partial","note":"런타임은 base ring + persistent skip + bounded spatial simulation link를 분리하며 actor-local topology epoch를 사용함."},{"plane":"Network","name":"Discovery","status":"partial","note":"1.5-hop discovery는 topology backbone에서 동작하고, spatial presence는 서버가 AOI direct simulation link 승격에 사용함."},{"plane":"Network","name":"Information Exposure","status":"design","note":"Spatial/Trust/Role/Event 기반 DataScope 정책은 아직 설계 개념."},{"plane":"Network","name":"State Distribution","status":"partial","note":"실시간 데모 전파는 존재하지만 계약 산출물은 provider/consumer 수준으로 미분해."},{"plane":"Simulation / Ordering","name":"Local Simulation","status":"contracted","note":"이동 local_position/local_velocity 및 전투 speculative 결과 계약 존재."},{"plane":"Simulation / Ordering","name":"Event Ordering","status":"partial","note":"event_id/actor_sequence/life_id와 event_ordering_state는 있으나 dependency[] 계약은 없음."},{"plane":"Simulation / Ordering","name":"History Commitment","status":"partial","note":"history_commitment_state는 존재하지만 prevHash/payloadHash/eventHash 구조는 없음."},{"plane":"Anchor / Evidence","name":"Server Anchor","status":"partial","note":"재접속에서 anchor 복원을 요구하지만 Anchor DTO(stateHash/historyRoot/signature)는 없음."},{"plane":"Anchor / Evidence","name":"Event Evidence","status":"partial","note":"전투 UX 설명에는 Evidence 경로가 있으나 최소 Evidence 필드 계약은 없음."},{"plane":"Verification","name":"Validator Assignment","status":"partial","note":"런타임은 signaling server가 actor별 validatorIds/quorum/assignmentId를 발급하며 sender가 위원회를 선택하지 못함. 계약 산출물에는 별도 DTO가 아직 없음."},{"plane":"Verification","name":"Structural Validation","status":"contracted","note":"검증 결과 및 Protocol Fault 신고에서 structural result가 직접 사용됨."},{"plane":"Verification","name":"Causal Validation","status":"contracted","note":"이벤트 검증 결과에 causal_validation_result가 직접 계약됨."},{"plane":"Verification","name":"Deterministic Verification","status":"contracted","note":"이벤트 검증 결과에 deterministic_verification_result가 직접 계약됨."},{"plane":"Verification","name":"Quorum Certificate","status":"contracted","note":"quorum_certificate_summary/state가 검증 조회 계약에 존재."},{"plane":"Finality","name":"Finality Policy","status":"partial","note":"finality_level/finality_level_gate는 있으나 EventClass→Requirement 정책 계약은 없음."},{"plane":"Finality","name":"Server Finalization","status":"contracted","note":"canonical_result/finalization timestamp/state 조회 계약 존재."},{"plane":"Finality","name":"Persistence / Economy","status":"contracted","note":"reward claim 및 L4 currency/inventory/ownership/rank 서버 권위 계약 존재."}],"contracts":[{"id":"CONTRACT-000","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-000","intent":"유효한 room_id를 대상으로 join_session을 실행하여 Membership epoch 신규 발급, MembershipContext 생성, Trust Policy 역할 배정, topology 초기화를 수행하고 세션 내부 진입 상태를 확정한다.","method":"POST","path":"/peer-simulated-server/join-session","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model000","transition":"입력 상태(membership_context=none, trust_policy_assignment=unassigned, topology_initialized=false) → 성공 시: membership_context=active, trust_policy_assignment=assigned, topology_initialized=true, action_state=approved. MEMBERSHIP_CONTEXT_ALREADY_ACTIVE 실패 시: 모든 상태값 unchanged, action_state=retry. ROOM_NOT_FOUND 실패 시: 모든 상태값 unchanged, action_state=retry.","successFields":["room_id","membership_epoch","peer_identity","role_class","session_status"],"failure":"Enum(MEMBERSHIP_CONTEXT_ALREADY_ACTIVE|ROOM_NOT_FOUND)"},{"id":"CONTRACT-001","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-001","intent":"기존 세션 식별 정보(room_id, membership_epoch, peer_identity, last_committed_sequence, life_id)를 확인하고, 해당 식별 정보로 재접속을 요청하여 committed history와 anchor를 복원한다.","method":"POST","path":"/reconnect","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model001","transition":"STEP-000: local_session_state=present → reconnect_button_active=true / local_session_state=absent|incomplete → reconnect_button_active=false. STEP-001: 요청 제출 시 reconnect_button_loading=true. 성공 시 action_state=approved, membership_context=epoch_reentered, history_commitment_state=restored, server_anchor_last=restored. MEMBERSHIP_EPOCH_MISMATCH|LIFE_ID_MISMATCH|NO_COMMITTED_SEQUENCE 시 action_state=quit, 관련 state 변경 없음. NETWORK_ERROR 시 action_state=retry.","successFields":["reconnect_result"],"failure":"Enum(MEMBERSHIP_EPOCH_MISMATCH|LIFE_ID_MISMATCH|NO_COMMITTED_SEQUENCE|NETWORK_ERROR|SESSION_ABSENT|SESSION_INCOMPLETE)"},{"id":"CONTRACT-002","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","intent":"이탈 의사 입력(메뉴 또는 단축키) 트리거를 수신하여 이탈 확인 다이얼로그를 표시하고, pending_finalization_warning 존재 여부에 따라 경고를 함께 노출한다.","method":"INPUT","path":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model002","transition":"트리거 인식 성공 시 dialog_state = open. pending_finalization_warning 존재 시 경고 포함 다이얼로그 표시. 인식 실패 시 dialog_state = closed 유지, action_state = retry.","successFields":["room_id","membership_epoch","pending_finalization_warning","_state"],"failure":"Enum(trigger_recognition_failed)"},{"id":"CONTRACT-003","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","intent":"이탈 확인 제출을 처리하여 membership_context에 Leave를 기록하고, membership_epoch를 이탈 시점으로 갱신하며, topology_state에서 해당 peer를 제거한 재구성 결과를 반영한다.","method":"POST","path":"/peer/simulated-server/finalized","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model003","transition":"Leave 기록 및 topology 재구성 성공 시 membership_context = left, topology_state = stable(재구성 완료), action_state = approved. 실패 시 membership_context·topology_state 원상 유지, action_state = retry.","successFields":["room_id","membership_epoch","_state"],"failure":"Enum(leave_record_failed|topology_reconfiguration_failed)"},{"id":"CONTRACT-004","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","intent":"이탈 확인 취소를 처리하여 다이얼로그를 닫고 membership_context·membership_epoch·topology_state를 이탈 의사 입력 이전 상태 그대로 유지한다.","method":"INPUT","path":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model004","transition":"취소 시 dialog_state = closed. membership_context·membership_epoch·topology_state 모두 unchanged. action_state = quit (leave_session 미완료).","successFields":["membership_epoch","_state"],"failure":"Enum()"},{"id":"CONTRACT-005","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-003","intent":"비-영 방향 이동 입력을 받아 로컬 시뮬레이션을 즉시 실행하고, local_position·local_velocity·actor_sequence를 갱신하며 speculative_render_state를 SPECULATIVE로 설정한다.","method":"LOCAL_SIMULATION","path":"/peer/simulated/movement","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model005","transition":"local_simulation_state=active AND life_id 일치 AND direction≠(0,0) → local_position·local_velocity 갱신, speculative_render_state=SPECULATIVE, actor_sequence+1. 그 외 조건 불충족 시 모든 상태 유지.","successFields":["local_position","local_velocity","_state"],"failure":"Enum(ZERO_MOVEMENT_INPUT_REJECTED|LIFE_ID_MISMATCH_REJECTED|SIMULATION_INACTIVE_REJECTED)"},{"id":"CONTRACT-006","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","intent":"전투 행동의 종류(action_type)와 대상(target_id)을 선택·지정하여 행동 확정 가능 상태를 구성한다","method":"INPUT","path":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model006","transition":"target_id 지정 완료 시 confirm_button_state → active; target_id 미지정(MISSING_ACTION_TARGET) 시 confirm_button_state → inactive 유지","successFields":["action_type","target_id","_state"],"failure":"Enum(MISSING_ACTION_TARGET)"},{"id":"CONTRACT-007","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","intent":"지정된 action_type과 target_id로 전투 행동을 확정 실행하여 로컬 시뮬레이션 낙관적 결과를 즉시 렌더링하고 상태를 전환한다","method":"ACTION","path":"/peer-simulated-server/finalized/combat-action","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model007","transition":"local_simulation_state=READY 이면 input_combat_action 실행 후 → local_simulation_state=PROCESSING, event_ordering_state=EVENT_INCLUDED, history_commitment_state=PENDING, optimistic_result_status=SPECULATIVE; local_simulation_state≠READY 이면 모든 상태 unchanged, error_reason=LOCAL_SIMULATION_NOT_READY","successFields":["action_type","target_id","speculative_hit_result","event_id","actor_sequence","life_id","_state"],"failure":"String"},{"id":"CONTRACT-008","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","intent":"외부 검증 경로(Audit/Trust path)로부터 수신한 VERIFIED 또는 INVALIDATED 신호에 따라 낙관적 결과 표시 상태와 커밋 상태를 최종 갱신한다","method":"EVENT","path":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model008","transition":"verification_signal=VERIFIED 시 → optimistic_result_status=VERIFIED, history_commitment_state=COMMITTED, local_simulation_state=COMPLETED, event_ordering_state 유지, event_id·actor_sequence·life_id 유지; verification_signal=INVALIDATED 시 → optimistic_result_status=INVALIDATED, history_commitment_state=FAILED, event_ordering_state=EVENT_REMOVED, local_simulation_state=ROLLBACK","successFields":["event_id","actor_sequence","life_id","speculative_hit_result","_state"],"failure":"Enum(SIGNAL_NOT_APPLICABLE)"},{"id":"CONTRACT-009","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-005","intent":"낙관적 실행 중인 액터의 Speculative(미검증) 상태 값을 로컬 시뮬레이션 상태로부터 읽어 상태 패널에 표시한다.","method":"READ","path":"local_simulation_state / actor","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model009","transition":"읽기 전용. local_simulation_state가 optimistic_active이면 actor_state를 출력하고 action_state=approved. not_active이면 actor_state 미출력, action_state=quit. 어떠한 상태 변화도 없다.","successFields":["actor_state"],"failure":"Enum(LOCAL_SIMULATION_NOT_ACTIVE)"},{"id":"CONTRACT-010","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-006","intent":"Audit/Trust path가 완료된 이벤트의 검증 결과(VERIFIED/INVALIDATED)를 목록에서 선택하여 quorum 인증서 요약, 개별 validation 결과, fault 분류, ruleset revision을 확인한다.","method":"GET","path":"/peer-simulated-server-finalized/events","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model010","transition":"목록 진입 시 list_load_state: loading → loaded | empty | error. 개별 이벤트 선택 시 detail_load_state: loading → loaded | error. loaded 시 view_event_verification_result: true. error 시 action_state: retry | quit.","successFields":["list","detail"],"failure":"Enum(list_load_failed|detail_load_failed|event_not_found)"},{"id":"CONTRACT-011","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-007","intent":"Server Finalization 이후 확정된 canonical 결과(finalized_event_id, finalized_event_class, canonical_result, server_finalization_timestamp, membership_epoch, finality_level)를 server_finalization_state 및 finality_level 기준에 따라 조건부 표시하는 읽기 흐름을 처리한다.","method":"READ","path":"server_finalization_state","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model011","transition":"결과 화면/전적 탭 진입 시 server_finalization_state 조회 → list_render_state: loaded|loading_failed. 항목 선택(view_finalized_result) 시 server_finalization_state + finality_level_gate 기준으로 detail_render_state: full(finalized, L3_or_above) | partial(finalized, below_L3) | non_finalized(non_finalized) 분기. 실패 시 action_state: retry|quit.","successFields":["step_000","step_001"],"failure":"Enum(NETWORK_ERROR|SERVER_ERROR|SERVER_FINALIZATION_NOT_COMPLETED|FINALIZATION_STATE_UNAVAILABLE)"},{"id":"CONTRACT-012","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-008","intent":"Server Finalization 완료 여부와 수령 자격을 확인한 뒤 보상 목록을 표시하고, 자격 충족 시 claim_reward를 실행하여 inventory/currency 상태를 영구 변경한다.","method":"COMMAND","path":"claim_reward","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model012","transition":"STEP-000: server_finalization_state=finalized & reward_eligibility_state=eligible → action_state=approved, claim_reward_available=true / server_finalization_state=not_finalized → action_state=quit, claim_reward_available=false / reward_eligibility_state=ineligible → action_state=quit, claim_reward_available=false / reward_eligibility_state=claimed → action_state=quit, claim_reward_available=false | STEP-001: claim_reward 실행 성공 → reward_eligibility_state=claimed, inventory_state=updated, currency_state=updated, action_state=approved / SERVER_FINALIZATION_INCOMPLETE → action_state=quit / REWARD_ELIGIBILITY_NOT_MET → action_state=quit / claimed 재시도 → inventory_state=unchanged, currency_state=unchanged, reward_eligibility_state=claimed / 네트워크·서버 오류 → action_state=retry, inventory_state=unchanged, currency_state=unchanged","successFields":["reward_type","reward_amount","reward_eligibility_proof","finalized_event_reference","inventory_preview","_effect"],"failure":"Enum(SERVER_FINALIZATION_INCOMPLETE|REWARD_ELIGIBILITY_NOT_MET|NETWORK_ERROR|SERVER_ERROR)"},{"id":"CONTRACT-013","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-009","intent":"인증된 사용자가 인벤토리/계정 상태 탭에 진입할 때 L4 Server Authoritative 경제 데이터(currency_balance, inventory_items, ownership_records, rank, match_result_history)를 읽기 전용으로 조회하여 표시한다.","method":"GET","path":"/economy/inventory","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model013","transition":"읽기 전용 조회. 로컬 상태 변경 없음. persistence_economy_state 유효 시 action_state=approved, 오류 시 action_state=retry.","successFields":["currency_balance","rank","inventory_items","ownership_records","match_result_history","_state","_effect"],"failure":"Enum(INVALID_PERSISTENCE_ECONOMY_STATE|NETWORK_ERROR|SERVER_ERROR)"},{"id":"CONTRACT-014","ux":"UX-PEER_SIMULATED_SERVER_FINALIZED-010","intent":"사용자가 의심 이벤트를 선택하고 EquivocationProof 또는 Protocol Fault 증거를 첨부하여 서버에 신고를 제출하는 흐름을 처리한다.","method":"POST","path":"/fault-report/submit","model":"MODEL-PEER_SIMULATED_SERVER_FINALIZED-Model014","transition":"structural_validation_result=valid && trust_policy_state=active → submit_fault_report triggered → action_state=approved / structural_validation_result=invalid → submit_fault_report blocked → action_state=quit(이탈 허용) / trust_policy_state=inactive → submit_fault_report blocked → action_state=quit(이탈 허용) / NETWORK_ERROR → action_state=retry","successFields":["report"],"failure":"Enum(STRUCTURAL_VALIDATION_INVALID|TRUST_POLICY_INACTIVE|NETWORK_ERROR|EVENT_LOAD_ERROR)"}],"ux":[{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-000","name":"세션 참가","flow":["룸/세션 선택 또는 매치 수락","참가 요청 제출"],"reason":"별도 진입점. Membership epoch 신규 발급, MembershipContext 생성, Trust Policy 역할 배정이 발생하여 인증·상태 변화 있음. 재접속(epoch 재진입)과 결과 화면 다름","display":["room_id","membership_epoch","peer_identity","role_class","session_status"],"state":["membership_context","trust_policy_assignment","topology_initialized"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-001","name":"세션 재접속","flow":["기존 세션 식별 정보 확인","재접속 요청 제출"],"reason":"별도 진입점. 기존 Membership epoch에 재진입하며 actorSequence 연속성·lifeId 유지 검증이 필요. 신규 참가와 달리 기존 committed history와 anchor 복원 흐름이 다름","display":["room_id","membership_epoch","peer_identity","last_committed_sequence","life_id"],"state":["membership_context","history_commitment_state","server_anchor_last"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-002","name":"세션 이탈","flow":["이탈 의사 입력(메뉴 또는 단축키)","이탈 확인 제출"],"reason":"별도 진입점. Membership epoch에서 Leave 기록, 미확정 consequential event 처리 분기, Topology peer 재구성이 발생. 참가와 반대 방향 상태 변화","display":["room_id","membership_epoch","pending_finalization_warning"],"state":["membership_context","topology_state"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-003","name":"이동 입력","flow":["방향/이동 입력 제공"],"reason":"독립적 중단 가능. Local Simulation 즉시 실행 → Speculative 상태 렌더링. 전투 행동과 독립 흐름(Realtime path). 결과는 SPECULATIVE이며 anchor/commitment 경로는 별도","display":["local_position","local_velocity","speculative_render_state"],"state":["local_simulation_state","actor_sequence","life_id"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-004","name":"전투 행동 입력","flow":["전투 행동 입력 제공(공격/스킬 등)"],"reason":"독립적 중단 가능. Optimistic Execution으로 즉시 렌더링 후 Evidence 구성 → Audit/Trust path 진입. 이동 입력과 분리 이유: Event Evidence 생성, Validator Assignment, Structural/Causal/Deterministic 검증 경로가 추가로 분기됨. 결과가 SPECULATIVE → VERIFIED → FINALIZED 또는 INVALIDATED로 달라짐","display":["action_type","target_id","speculative_hit_result","event_id","actor_sequence","life_id"],"state":["local_simulation_state","event_ordering_state","history_commitment_state","optimistic_result_status"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-005","name":"Speculative 상태 조회","flow":["현재 게임 화면 내 상태 패널 확인"],"reason":"읽기 전용 흐름. 상태 변화 없음. Speculative(미검증) 값만 표시하며 Finalized 상태 조회와 결과 화면 다름. 낙관적 실행 중인 수치(HP, 위치 등)를 사용자가 직접 확인하는 독립 조회","display":["speculative_hp","speculative_position","speculative_combat_state","life_id","actor_sequence","speculative_label"],"state":["local_simulation_state"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-006","name":"이벤트 검증 결과 확인","flow":["이벤트 결과 알림 또는 이력 탭 진입","개별 이벤트 결과 선택"],"reason":"별도 진입점. Audit/Trust path 완료 후 VERIFIED/INVALIDATED 상태를 사용자가 확인하는 읽기 흐름. Speculative 조회와 결과 화면 다름(검증 완료 여부, fault 여부 포함). Finalized 조회와도 다름(Server Finalization 이전 단계)","display":["event_id","event_class","verification_status","quorum_certificate_summary","fault_classification","ruleset_revision"],"state":["quorum_certificate_state","structural_validation_result","causal_validation_result","deterministic_verification_result"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-007","name":"Finalized 결과 확인","flow":["결과 화면 또는 전적 탭 진입","확정 결과 항목 선택"],"reason":"별도 진입점. Server Finalization 이후 canonical 결과(사망, 매치 결과, 보상 자격 등 L3 이상)를 확인하는 읽기 흐름. 검증 결과 확인과 결과 화면 다름(canonical 확정 여부, consequential state 포함)","display":["finalized_event_id","finalized_event_class","canonical_result","server_finalization_timestamp","membership_epoch","finality_level"],"state":["server_finalization_state"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-008","name":"보상 수령","flow":["보상 목록 확인","수령 요청 제출"],"reason":"별도 진입점. L3/L4 수준 Server Finalization 완료 후에만 가능. 수령 즉시 Persistence/Economy에 account/inventory 상태 변화 발생. 단순 조회와 달리 영구 상태 변경","display":["reward_type","reward_amount","reward_eligibility_proof","finalized_event_reference","inventory_preview"],"state":["reward_eligibility_state","server_finalization_state","inventory_state","currency_state"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-009","name":"경제/인벤토리 조회","flow":["인벤토리 또는 계정 상태 탭 진입"],"reason":"읽기 전용 흐름. 상태 변화 없음. L4 Server Authoritative 데이터만 표시. peer authority 없음. 보상 수령·거래와 독립적 진입점","display":["currency_balance","inventory_items","ownership_records","rank","match_result_history"],"state":["persistence_economy_state"]},{"id":"UX-PEER_SIMULATED_SERVER_FINALIZED-010","name":"Protocol Fault 신고","flow":["의심 이벤트 선택","신고 증거 첨부 및 제출"],"reason":"별도 진입점. EquivocationProof 또는 Protocol Fault 증거를 사용자가 명시적으로 서버에 제출하는 흐름. 단순 조회나 게임플레이 행동과 결과 화면 다름. Trust Policy 입력으로 연결될 수 있는 독립 중단 가능 흐름","display":["suspected_event_id","equivocation_proof_summary","fault_classification","actor_id","life_id","sequence"],"state":["structural_validation_result","trust_policy_state"]}]};
 let activeConsoleView='runtime';
 function setConsoleView(name){
     activeConsoleView=name;
@@ -194,14 +194,14 @@ function renderVerificationConsole(){
 renderArchitectureConsole(); renderContractsConsole(); renderVerificationConsole();
 
 
-const PROTOCOL = 12;
-const SIGNAL_PROTOCOL = 2;
+const PROTOCOL = 13;
+const SIGNAL_PROTOCOL = 4;
+const RULESET_REVISION = 'pssf-v13-r1';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
 const AOI_RADIUS = clampNumber(params.get('aoi'), 260, 120, 1400);
-const COMMITTEE_SIZE = Math.round(clampNumber(params.get('committee'), 3, 1, 7));
-const TRAINER_COUNT = Math.round(clampNumber(params.get('trainer'), 3, 0, 6));
+const COMMITTEE_SIZE = 3; // 실제 validator/quorum은 signaling server의 assignment가 결정한다.
 const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
 // 모든 피어가 공유하는 논리 월드. 브라우저/canvas 크기는 렌더 viewport일 뿐 게임 경계가 아니다.
@@ -215,21 +215,12 @@ const BASE_MAX_STEP = 50;
 const STEP_JITTER_ALLOWANCE = 1.35;
 const STEP_EPSILON = 0.75;
 const MAX_TICK_ADVANCE = 120;
-const MAX_RANGE = Math.max(60, Math.min(450, AOI_RADIUS - 30));
+const MAX_RANGE = 230; // combat ruleset은 AOI 설정과 독립
 const HIT_RADIUS = 14;
 const MAX_HP = 3;
 const RESPAWN_MS = 5000;
 const REGEN_INTERVAL_TICKS = 30;
 const BULLET_TRAIL_MS = 160;
-const TRAINER_MIN_PING_MS = 25;
-const TRAINER_MAX_PING_MS = 190;
-const TRAINER_WINDUP_MIN_MS = 650;
-const TRAINER_WINDUP_MAX_MS = 950;
-const TRAINER_HIT_RADIUS = 18;
-const TRAINER_MIN_ORBIT = 150;
-const TRAINER_MAX_ORBIT = 285;
-const TRAINER_FIRE_GAP_MIN_MS = 900;
-const TRAINER_FIRE_GAP_MAX_MS = 1650;
 const MOVE_SPEED = 220;
 const MOVE_ACCEL = 620;
 const MOVE_DECEL = 560;
@@ -241,7 +232,8 @@ const SIGNAL_RECONNECT_BASE_MS = 800;
 const SIGNAL_RECONNECT_MAX_MS = 15000;
 const SIGNAL_KEEPALIVE_MS = 25000;
 const ROOM_JOIN_TIMEOUT_MS = 12000;
-const ORPHAN_RECEIPT_TTL_MS = 8000;
+const POLICY_GRACE_MS = 15000;
+const PRESENCE_INTERVAL_MS = 1000;
 const KDA_WINDOW_MS = 5 * 60 * 1000;
 const KILL_FEED_LIMIT = 8;
 const COMMIT_LATENCY_SAMPLES = 240;
@@ -295,16 +287,16 @@ const remoteRenderState = Object.create(null); // remote authoritative interpola
 const relayWorld = new Map(); // discovery-only 1.5-hop summaries; never authoritative
 const seenRelayRecords = new Map();
 const bullets = [];
-const trainerBots = [];
-const trainerShots = [];
-let trainerHits = 0, trainerDodges = 0;
+const botTelegraphs = new Map(); // optional server-bot prefire hints; never gameplay authority
 const hitFlashes = Object.create(null);
 const pendingById = new Map();
 const pendingOrderByPlayer = new Map();
 const deferredCommands = new Map();
 const seenCommandIds = new Set();
 const seenCommandQueue = [];
-const orphanReceipts = new Map();
+const orphanCertificates = new Map();
+const policyByAssignment = new Map();
+const currentPolicyByPeer = new Map();
 const damageContributors = new Map();
 const killEvents = new Map();
 const commitLatencySamples = [];
@@ -335,6 +327,11 @@ let roomJoinTimeout = null;
 let roomReady = false;
 let serverMembershipEpoch = null;
 let serverPeerCount = 0;
+let serverMembershipRoot = null;
+const desiredTopologyPeers = new Set();
+const desiredSimulationPeers = new Set();
+const desiredDirectPeers = new Set();
+let selfTopologyPolicy = null;
 let signalManualClose = false;
 let pageUnloading = false;
 let pendingLogs = [];
@@ -372,7 +369,7 @@ function stableHash(value){
     return (hash>>>0).toString(16).padStart(8,'0');
 }
 function stateHash(state){
-    return stableHash({x:round6(state.x),y:round6(state.y),sequence:state.sequence,tick:state.tick,hp:state.hp,alive:state.alive,lifeId:state.lifeId});
+    return stableHash({x:round6(state.x),y:round6(state.y),sequence:state.sequence,tick:state.tick,hp:state.hp,alive:state.alive,lifeId:state.lifeId,deadServerAt:Number(state.deadServerAt)||0});
 }
 function sanitizeRoomId(value){ return (String(value||'default').trim().slice(0,64)||'default').replace(/[^a-zA-Z0-9_.:-]/g,'_'); }
 function normalizeSignalUrl(value){
@@ -400,6 +397,7 @@ function initializePlayer(playerId,x,y,color=colorFor(playerId),options={}){
         alive:options.alive!==false,
         lifeId:Number.isSafeInteger(options.lifeId)?options.lifeId:1,
         deadObservedAt:options.alive===false?performance.now():0,
+        deadServerAt:Number.isFinite(options.deadServerAt)?options.deadServerAt:0,
         tentative:false
     };
     confirmedWorld[playerId]={...state};
@@ -411,30 +409,56 @@ function initializePlayer(playerId,x,y,color=colorFor(playerId),options={}){
 }
 
 function currentMembershipIds(){
-    const ids=[myId];
-    for(const [id,peer] of peers) if(peer.dc?.readyState==='open') ids.push(id);
-    return [...new Set(ids)].sort();
+    // Compatibility name: this is the currently open sparse direct set, never full room membership.
+    return [myId,...directOpenPeerIds()].sort();
+}
+function storeServerPolicy(policy,{self=false}={}){
+    if(!policy||typeof policy.peerId!=='string'||typeof policy.assignmentId!=='string') return;
+    const now=performance.now();
+    const previous=currentPolicyByPeer.get(policy.peerId);
+    if(previous&&previous.assignmentId!==policy.assignmentId){ previous.expiresAt=now+POLICY_GRACE_MS; policyByAssignment.set(previous.assignmentId,previous); }
+    const copy={...policy,expiresAt:now+POLICY_GRACE_MS};
+    policyByAssignment.set(copy.assignmentId,copy);
+    currentPolicyByPeer.set(copy.peerId,copy);
+    if(self||copy.peerId===myId) selfTopologyPolicy=copy;
+}
+function pruneServerPolicies(){
+    const now=performance.now();
+    for(const [assignmentId,policy] of policyByAssignment){
+        if(policy.expiresAt<=now&&currentPolicyByPeer.get(policy.peerId)?.assignmentId!==assignmentId) policyByAssignment.delete(assignmentId);
+    }
+}
+function applyPolicyView(message){
+    if(message?.selfPolicy) storeServerPolicy(message.selfPolicy,{self:true});
+    for(const policy of Array.isArray(message?.peerPolicies)?message.peerPolicies:[]) storeServerPolicy(policy);
+    pruneServerPolicies();
+}
+function policyForCommand(command){
+    const policy=policyByAssignment.get(command?.assignmentId);
+    return policy&&policy.peerId===command.playerId?policy:null;
 }
 function membershipDescriptor(){
-    const membershipIds=currentMembershipIds();
-    const membershipHash=stableHash(membershipIds);
-    return {membershipIds,membershipHash,epochId:stableHash({room:ROOM_ID,membershipHash})};
+    const p=selfTopologyPolicy;
+    return {
+        membershipEpoch:serverMembershipEpoch||'unassigned', // informational only
+        membershipRoot:serverMembershipRoot||'unassigned',  // informational only
+        topologyEpoch:p?.topologyEpoch??0,
+        assignmentId:p?.assignmentId||'unassigned',
+        validatorIds:[...(p?.validatorIds||[])],
+        quorum:p?.quorum||0
+    };
 }
-function committeeSeed(command){ return stableHash({epochId:command.epochId,membershipHash:command.membershipHash,playerId:command.playerId,sequence:command.sequence,previousStateHash:command.previousStateHash}); }
-function validatorsFor(command){
-    const candidates=command.membershipIds.filter(id=>id!==command.playerId);
-    if(!candidates.length) return [command.playerId];
-    const seed=committeeSeed(command);
-    return [...candidates].sort((a,b)=>stableHash(`${seed}:${a}`).localeCompare(stableHash(`${seed}:${b}`))).slice(0,Math.min(COMMITTEE_SIZE,candidates.length));
+function validatorsFor(command){ return [...(policyForCommand(command)?.validatorIds||[])]; }
+function quorumFor(command){ return policyForCommand(command)?.quorum||0; }
+function commandPolicyMatches(command){
+    const p=policyForCommand(command);
+    return Boolean(p)&&p.topologyEpoch===command.topologyEpoch&&p.rulesetRevision===RULESET_REVISION;
 }
-function quorumFor(command){ return Math.floor(validatorsFor(command).length/2)+1; }
-function membershipMatches(command){ const current=membershipDescriptor(); return current.membershipHash===command.membershipHash&&current.epochId===command.epochId; }
 function refreshMembership(reason=''){
     membershipRevision++;
-    const descriptor=membershipDescriptor();
-    document.getElementById('membershipVersion').textContent=`${membershipRevision} / ${descriptor.membershipHash}`;
-    document.getElementById('epochStat').textContent=descriptor.epochId;
-    if(reason) log('t-sys',`membership rev=${membershipRevision} epoch=${descriptor.epochId} members=${descriptor.membershipIds.join(',')} reason=${reason}`);
+    document.getElementById('membershipVersion').textContent=`${serverPeerCount} room / ${directOpenPeerIds().length} direct`;
+    document.getElementById('epochStat').textContent=serverMembershipEpoch||'-';
+    if(reason) log('t-sys',`membership room=${serverPeerCount} direct=${directOpenPeerIds().length} epoch=${serverMembershipEpoch||'-'} root=${serverMembershipRoot||'-'} reason=${reason}`);
 }
 function distanceBetweenStates(a,b){ return a&&b?Math.hypot(a.x-b.x,a.y-b.y):Infinity; }
 function isInLocalAoi(playerId){ if(playerId===myId) return true; return distanceBetweenStates(visibleWorld[myId],visibleWorld[playerId])<=AOI_RADIUS; }
@@ -472,7 +496,7 @@ function sendNeighborDigest(remoteId){
     const entries=candidates.slice(0,RELAY_MAX_ENTRIES).map(item=>item.entry);
     safeDataSend(remoteId,{kind:'neighborDigest',digest:{protocol:PROTOCOL,senderId:myId,relayDepth:1,ttlMs:RELAY_TTL_MS,entries}});
 }
-function broadcastNeighborDigests(){ for(const id of directOpenPeerIds()) sendNeighborDigest(id); }
+function broadcastNeighborDigests(){ for(const id of desiredTopologyPeers) if(peers.get(id)?.dc?.readyState==='open') sendNeighborDigest(id); }
 function validRelayEntry(remoteId,entry){
     return entry&&entry.sourcePeerId===remoteId&&entry.relayDepth===1&&typeof entry.ownerId==='string'&&entry.ownerId!==myId&&entry.ownerId!==remoteId&&
         Number.isSafeInteger(entry.sequence)&&entry.sequence>=0&&Number.isSafeInteger(entry.tick)&&entry.tick>=0&&
@@ -480,6 +504,7 @@ function validRelayEntry(remoteId,entry){
         typeof entry.alive==='boolean'&&typeof entry.stateHash==='string'&&entry.stateHash.length<=32;
 }
 function receiveNeighborDigest(remoteId,digest){
+    if(!desiredTopologyPeers.has(remoteId)){ relayDroppedCounter++; return; }
     if(!digest||digest.protocol!==PROTOCOL||digest.senderId!==remoteId||digest.relayDepth!==1||!Array.isArray(digest.entries)||digest.entries.length>RELAY_MAX_ENTRIES){
         invalidCounter++; log('t-warn',`invalid 1.5-hop digest from=${remoteId}`); return;
     }
@@ -513,7 +538,8 @@ function allowedStepForTicks(previousTick,commandTick){
 }
 function computeMove(prev,dx,dy,tick){
     const maxStep=allowedStepForTicks(prev.tick,tick); const distance=Math.hypot(dx,dy); const scale=distance>maxStep&&distance>0?maxStep/distance:1;
-    return {x:round6(prev.x+dx*scale),y:round6(prev.y+dy*scale),distance:round6(distance),maxStep:round6(maxStep),speedViolation:distance>maxStep+1e-9,tickViolation:tick<prev.tick};
+    const point=clampWorldPoint(prev.x+dx*scale,prev.y+dy*scale);
+    return {x:round6(point.x),y:round6(point.y),distance:round6(distance),maxStep:round6(maxStep),speedViolation:distance>maxStep+1e-9,tickViolation:tick<prev.tick};
 }
 function checkCommandTick(playerId,tick,previousTick){
     if(tick<previousTick) return {ok:false,reason:`tick regression previous=${previousTick} got=${tick}`};
@@ -532,7 +558,7 @@ function getPredictedTail(playerId){
 }
 function makeBaseCommand(type,previous){
     const sequence=++localSequence; const membership=membershipDescriptor();
-    return {protocol:PROTOCOL,type,commandId:createCommandId(myId,sequence),playerId:myId,sequence,previousStateHash:stateHash(previous),tick:currentTick(),membershipIds:membership.membershipIds,membershipHash:membership.membershipHash,epochId:membership.epochId,aoiRadius:AOI_RADIUS};
+    return {protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,type,commandId:createCommandId(myId,sequence),playerId:myId,sequence,previousStateHash:stateHash(previous),tick:currentTick(),topologyEpoch:membership.topologyEpoch,assignmentId:membership.assignmentId,aoiRadius:AOI_RADIUS};
 }
 function makeMoveCommand(dx,dy){
     const prev=getPredictedTail(myId); if(!prev||!prev.alive) return null;
@@ -546,7 +572,7 @@ function makeMoveCommand(dx,dy){
 function buildShootCheckpoint(shooter){
     const membership=membershipDescriptor(); const checkpoint=[]; const world=Object.create(null);
     const interestRadius=Math.max(AOI_RADIUS,MAX_RANGE+HIT_RADIUS+24);
-    for(const id of membership.membershipIds){
+    for(const id of [myId,...directOpenPeerIds()]){
         const state=id===myId?shooter:confirmedWorld[id];
         if(!state) continue;
         if(id!==myId&&distanceBetweenStates(shooter,state)>interestRadius) continue;
@@ -562,7 +588,7 @@ function makeShootCommand(dirX,dirY){
     const data=buildShootCheckpoint(shooter); if(!data){ log('t-warn','shoot blocked: checkpoint incomplete'); return null; }
     const command=makeBaseCommand('shoot',shooter); const originX=round6(shooter.x),originY=round6(shooter.y);
     const hitId=rayHit(originX,originY,dirX,dirY,data.world,myId);
-    return {...command,membershipIds:data.membership.membershipIds,membershipHash:data.membership.membershipHash,originX,originY,dirX:round6(dirX),dirY:round6(dirY),checkpoint:data.checkpoint,checkpointHash:stableHash(data.checkpoint),claimedHitId:hitId,claimedHitLifeId:hitId?data.world[hitId].lifeId:null};
+    return {...command,originX,originY,dirX:round6(dirX),dirY:round6(dirY),checkpoint:data.checkpoint,checkpointHash:stableHash(data.checkpoint),claimedHitId:hitId,claimedHitLifeId:hitId?data.world[hitId].lifeId:null};
 }
 function makeHealCommand(){
     const prev=getPredictedTail(myId); if(!prev||!prev.alive||prev.hp>=MAX_HP) return null;
@@ -574,29 +600,29 @@ function makeRespawnCommand(){
 }
 
 function validateEnvelope(remoteId,command){
-    if(!command||command.protocol!==PROTOCOL) return 'unsupported protocol';
+    if(!command||command.protocol!==PROTOCOL||command.rulesetRevision!==RULESET_REVISION) return 'unsupported protocol/ruleset';
     if(!['move','shoot','heal','respawn'].includes(command.type)) return 'unsupported command';
     if(command.playerId!==remoteId) return `identity mismatch channel=${remoteId} payload=${command.playerId}`;
-    if(typeof command.commandId!=='string'||command.commandId.length>128) return 'invalid commandId';
+    if(typeof command.commandId!=='string'||command.commandId.length>160) return 'invalid commandId';
     if(!Number.isSafeInteger(command.sequence)||command.sequence<1) return 'invalid sequence';
     if(!Number.isSafeInteger(command.tick)||command.tick<0) return 'invalid tick';
     if(typeof command.previousStateHash!=='string') return 'invalid previousStateHash';
-    if(typeof command.epochId!=='string'||command.epochId.length>32) return 'invalid epoch';
-    if(!Number.isFinite(command.aoiRadius)||command.aoiRadius<240||command.aoiRadius>1400) return 'invalid AOI radius';
-    if(!Array.isArray(command.membershipIds)||command.membershipIds.length<1||command.membershipIds.length>64) return 'invalid membership';
-    if(command.membershipIds.some(id=>typeof id!=='string'||id.length>96)) return 'invalid member id';
-    if(stableHash([...command.membershipIds].sort())!==command.membershipHash) return 'membership hash mismatch';
+    if(typeof command.assignmentId!=='string'||command.assignmentId.length>64||!Number.isSafeInteger(command.topologyEpoch)) return 'invalid assignment';
+    if(!commandPolicyMatches(command)) return 'unknown server assignment';
+    if(!Number.isFinite(command.aoiRadius)||command.aoiRadius<120||command.aoiRadius>1400) return 'invalid AOI radius';
     if(command.type==='move'&&![command.dx,command.dy,command.claimedX,command.claimedY].every(Number.isFinite)) return 'invalid move values';
-    if(command.type==='shoot'&&(![command.originX,command.originY,command.dirX,command.dirY].every(Number.isFinite)||!Array.isArray(command.checkpoint))) return 'invalid shoot values';
+    if(command.type==='shoot'&&(![command.originX,command.originY,command.dirX,command.dirY].every(Number.isFinite)||!Array.isArray(command.checkpoint)||command.checkpoint.length>64)) return 'invalid shoot values';
     if(command.type==='heal'&&!Number.isSafeInteger(command.claimedHp)) return 'invalid heal value';
     if(command.type==='respawn'&&(!Number.isFinite(command.spawnX)||!Number.isFinite(command.spawnY)||!Number.isSafeInteger(command.nextLifeId))) return 'invalid respawn values';
     return null;
 }
+function verificationRequired(commandOrType){ const type=typeof commandOrType==='string'?commandOrType:commandOrType?.type; return type==='shoot'||type==='heal'||type==='respawn'; }
 
 function executeLocal(command){
     if(!command) return;
     acceptCommand(command,false);
-    broadcast({kind:'command',command});
+    const policy=policyForCommand(command);
+    for(const id of policy?.directPeers||[]) if(peers.get(id)?.dc?.readyState==='open') safeDataSend(id,{kind:'command',command});
 }
 function receiveCommand(remoteId,command){
     const error=validateEnvelope(remoteId,command); if(error){ invalidCounter++; log('t-err',`command rejected before audit: ${error}`); return; }
@@ -611,18 +637,29 @@ function acceptCommand(command,remote){
     if(command.sequence<expected){ rejectedCounter++; log('t-warn',`stale command player=${command.playerId} expected=${expected} got=${command.sequence}`); return; }
     const previous=getPredictedTail(command.playerId);
     if(!previous||stateHash(previous)!==command.previousStateHash){ rejectedCounter++; log('t-warn',`state hash mismatch id=${command.commandId}`); return; }
-    const pending={command,previousState:{...previous},nextState:predictNextState(previous,command),receipts:new Map(),verdict:null,stalled:false,timeoutId:null,remote,receivedAt:performance.now()};
+    const pending={command,previousState:{...previous},nextState:predictNextState(previous,command),verdict:null,rejectReason:null,stalled:false,timeoutId:null,remote,receivedAt:performance.now()};
     pendingById.set(command.commandId,pending);
     const order=pendingOrderByPlayer.get(command.playerId)||[]; order.push(command.commandId); pendingOrderByPlayer.set(command.playerId,order);
-    // 원격 화면은 검증 완료를 기다리지 않고 tentative 권위 좌표를 보간한다.
-    // 거절되면 rebuildVisible()이 confirmed 좌표로 부드럽게 교정한다.
     rebuildVisible(command.playerId);
     if(command.type==='shoot') spawnBullet(command);
-    const validators=validatorsFor(command); const quorum=quorumFor(command);
+
+    const orphan=orphanCertificates.get(command.commandId);
+    if(orphan){ orphanCertificates.delete(command.commandId); applyVerificationCertificate(orphan); }
+
+    if(command.type==='move'&&!pending.verdict){
+        const result=evaluateCommand(command);
+        pending.verdict=result.accepted?'accepted':'rejected'; pending.rejectReason=result.reason;
+        log(result.accepted?'t-cmd':'t-warn',`move L1 ${result.accepted?'accepted':'rejected'} id=${command.commandId} seq=${command.sequence}`);
+        drainCommits(command.playerId);
+        return;
+    }
+
+    if(pending.verdict) return;
+    const validators=validatorsFor(command),quorum=quorumFor(command);
+    if(!validators.length||!quorum){ const result=evaluateCommand(command); pending.verdict=result.accepted?'accepted':'rejected'; pending.rejectReason=result.reason; log('t-sys',`${command.type} q0 fallback ${pending.verdict} id=${command.commandId}`); drainCommits(command.playerId); return; }
     log('t-cmd',`${command.type} tentative id=${command.commandId} seq=${command.sequence} validators=${validators.join(',')} quorum=${quorum}`);
-    const orphan=orphanReceipts.get(command.commandId); if(orphan){ for(const receipt of orphan.values()) applyReceipt(receipt.validatorId,receipt); orphanReceipts.delete(command.commandId); }
     if(validators.includes(myId)) runAudit(command);
-    pending.timeoutId=setTimeout(()=>{ const live=pendingById.get(command.commandId); if(live&&!live.verdict&&!live.stalled){ live.stalled=true; stalledCounter++; log('t-warn',`STALLED id=${command.commandId} committee=${validators.join(',')} receipts=${live.receipts.size}/${quorum}`); } },AUDIT_STALL_MS);
+    pending.timeoutId=setTimeout(()=>{ const live=pendingById.get(command.commandId); if(live&&!live.verdict&&!live.stalled){ live.stalled=true; stalledCounter++; log('t-warn',`STALLED id=${command.commandId} committee=${validators.join(',')} certificate pending`); } },AUDIT_STALL_MS);
 }
 function predictNextState(previous,command){
     if(command.type==='move'){
@@ -633,77 +670,69 @@ function predictNextState(previous,command){
     if(command.type==='respawn') return {...previous,x:command.spawnX,y:command.spawnY,hp:MAX_HP,alive:true,lifeId:command.nextLifeId,tick:command.tick,sequence:command.sequence,deadObservedAt:0,tentative:true};
     return {...previous,tick:command.tick,sequence:command.sequence,tentative:true};
 }
-
-function runAudit(command){
-    const pending=pendingById.get(command.commandId); if(!pending) return;
-    let accepted=false,reason='',computed=null;
+function evaluateCommand(command){
+    const pending=pendingById.get(command.commandId); if(!pending) return {accepted:false,reason:'missing pending',computed:null};
     const previous=pending.previousState;
-    const tickCheck=checkCommandTick(command.playerId,command.tick,previous.tick);
-    if(!membershipMatches(command)){ membershipMismatchCounter++; reason='membership mismatch'; }
-    else if(!tickCheck.ok){ reason=tickCheck.reason; }
-    else if(command.type==='move'){
+    if(!commandPolicyMatches(command)) return {accepted:false,reason:'server assignment mismatch',computed:null};
+    if(command.tick<previous.tick) return {accepted:false,reason:`tick regression previous=${previous.tick} got=${command.tick}`,computed:null};
+    if(command.type==='move'){
         const result=computeMove(previous,command.dx,command.dy,command.tick);
-        accepted=previous.alive&&!result.speedViolation&&!result.tickViolation&&result.x===command.claimedX&&result.y===command.claimedY&&inBounds(result.x,result.y);
-        reason=accepted?'move verified':`move invalid distance=${result.distance} max=${result.maxStep}`; computed=result;
-    }else if(command.type==='shoot'){
+        const accepted=previous.alive&&!result.speedViolation&&!result.tickViolation&&result.x===command.claimedX&&result.y===command.claimedY&&inBounds(result.x,result.y);
+        return {accepted,reason:accepted?'move verified':`move invalid distance=${result.distance} max=${result.maxStep}`,computed:result};
+    }
+    if(command.type==='shoot'){
         const length=Math.hypot(command.dirX,command.dirY);
         const originMatches=Math.hypot(previous.x-command.originX,previous.y-command.originY)<1.5;
         const checkpointOk=stableHash(command.checkpoint)===command.checkpointHash&&checkpointMatchesLocal(command.checkpoint,command.playerId,previous);
         const world=Object.create(null); for(const item of command.checkpoint) world[item.playerId]=item;
         const hit=rayHit(command.originX,command.originY,command.dirX,command.dirY,world,command.playerId);
         const life=hit?world[hit]?.lifeId:null;
-        accepted=previous.alive&&Math.abs(length-1)<0.02&&originMatches&&checkpointOk&&hit===command.claimedHitId&&life===command.claimedHitLifeId&&command.aoiRadius===AOI_RADIUS;
-        reason=accepted?'shoot verified':`shoot invalid hit=${hit||'none'} checkpoint=${checkpointOk}`; computed={hit,life};
-    }else if(command.type==='heal'){
-        const activity=activityAnchors.get(command.playerId);
-        const idleMs=activity?performance.now()-Math.max(activity.lastMoveAt,activity.lastDamageAt,activity.lastHealAt):0;
-        accepted=previous.alive&&previous.hp<MAX_HP&&idleMs>=900&&command.claimedHp===previous.hp+1;
-        reason=accepted?'heal verified':`heal invalid state idleMs=${Math.round(idleMs)}`;
-    }else if(command.type==='respawn'){
-        const deathAge=performance.now()-(previous.deadObservedAt||0);
-        accepted=!previous.alive&&deathAge>=RESPAWN_MS-300&&command.nextLifeId===previous.lifeId+1&&inBounds(command.spawnX,command.spawnY);
-        reason=accepted?'respawn verified':`respawn invalid deadAge=${Math.round(deathAge)}ms`;
+        const accepted=previous.alive&&Math.abs(length-1)<0.02&&originMatches&&checkpointOk&&hit===command.claimedHitId&&life===command.claimedHitLifeId;
+        return {accepted,reason:accepted?'shoot verified':`shoot invalid hit=${hit||'none'} checkpoint=${checkpointOk}`,computed:{hit,life}};
     }
-    const receipt={protocol:PROTOCOL,commandId:command.commandId,playerId:command.playerId,sequence:command.sequence,validatorId:myId,accepted,reason,computed};
-    applyReceipt(myId,receipt); broadcast({kind:'receipt',receipt});
+    if(command.type==='heal'){
+        const accepted=previous.alive&&previous.hp<MAX_HP&&command.claimedHp===previous.hp+1;
+        return {accepted,reason:accepted?'heal verified':'heal invalid state',computed:null};
+    }
+    if(command.type==='respawn'){
+        const deathAge=performance.now()-(previous.deadObservedAt||0);
+        const accepted=!previous.alive&&deathAge>=RESPAWN_MS-300&&command.nextLifeId===previous.lifeId+1&&inBounds(command.spawnX,command.spawnY);
+        return {accepted,reason:accepted?'respawn verified':`respawn invalid deadAge=${Math.round(deathAge)}ms`,computed:null};
+    }
+    return {accepted:false,reason:'unsupported',computed:null};
 }
+function runAudit(command){
+    const result=evaluateCommand(command);
+    const receipt={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,commandId:command.commandId,playerId:command.playerId,sequence:command.sequence,assignmentId:command.assignmentId,decision:result.accepted?'accept':'reject',reason:result.reason,computedHash:stableHash(result.computed||null),evidenceHash:stableHash(command)};
+    if(!sendSignal({type:'verification-receipt',receipt})) log('t-warn',`verification receipt signaling failed id=${command.commandId}`);
+}
+
 function checkpointMatchesLocal(checkpoint,shooterId,shooterState){
     if(!Array.isArray(checkpoint)||checkpoint.length>64) return false;
-    const interestRadius=Math.max(AOI_RADIUS,MAX_RANGE+HIT_RADIUS+24);
-    const expected=currentMembershipIds().filter(id=>{
-        const local=id===shooterId?shooterState:confirmedWorld[id];
-        return Boolean(local)&&(id===shooterId||distanceBetweenStates(shooterState,local)<=interestRadius);
-    }).sort();
-    const actual=checkpoint.map(item=>item?.playerId).sort();
-    if(expected.length!==actual.length||expected.some((id,index)=>id!==actual[index])) return false;
+    const seen=new Set(); let shooterSeen=false;
     for(const item of checkpoint){
-        if(!item||typeof item.playerId!=='string'||![item.x,item.y].every(Number.isFinite)||!Number.isSafeInteger(item.lifeId)) return false;
+        if(!item||typeof item.playerId!=='string'||seen.has(item.playerId)||![item.x,item.y].every(Number.isFinite)||!Number.isSafeInteger(item.lifeId)||!inBounds(item.x,item.y)) return false;
+        seen.add(item.playerId);
+        if(item.playerId===shooterId){ shooterSeen=true; if(Math.hypot(shooterState.x-item.x,shooterState.y-item.y)>1.5||item.lifeId!==shooterState.lifeId) return false; }
         const local=item.playerId===shooterId?shooterState:confirmedWorld[item.playerId];
-        if(!local) return false;
-        if(Math.hypot(local.x-item.x,local.y-item.y)>2.5||local.lifeId!==item.lifeId||Boolean(local.alive)!==Boolean(item.alive)) return false;
+        // Evidence is self-contained; if this verifier also has the actor directly, cross-check it.
+        if(local&&Math.hypot(local.x-item.x,local.y-item.y)>3.5) return false;
+        if(local&&local.lifeId!==item.lifeId) return false;
     }
-    return true;
+    return shooterSeen;
 }
-function receiveReceipt(remoteId,receipt){
-    if(!receipt||receipt.protocol!==PROTOCOL||receipt.validatorId!==remoteId){ invalidCounter++; log('t-err',`invalid receipt identity from=${remoteId}`); return; }
-    if(!pendingById.has(receipt.commandId)){
-        let bucket=orphanReceipts.get(receipt.commandId); if(!bucket){ bucket=new Map(); orphanReceipts.set(receipt.commandId,bucket); setTimeout(()=>orphanReceipts.delete(receipt.commandId),ORPHAN_RECEIPT_TTL_MS); }
-        bucket.set(remoteId,receipt); return;
-    }
-    applyReceipt(remoteId,receipt);
-}
-function applyReceipt(remoteId,receipt){
-    const pending=pendingById.get(receipt.commandId); if(!pending||pending.verdict) return;
-    const validators=validatorsFor(pending.command);
-    if(!validators.includes(remoteId)){ invalidCounter++; log('t-err',`unauthorized receipt validator=${remoteId}`); return; }
-    if(receipt.playerId!==pending.command.playerId||receipt.sequence!==pending.command.sequence) return;
-    pending.receipts.set(remoteId,receipt);
-    const accepted=[...pending.receipts.values()].filter(r=>r.accepted).length;
-    const rejected=[...pending.receipts.values()].filter(r=>!r.accepted).length;
-    const quorum=quorumFor(pending.command);
-    if(accepted>=quorum) pending.verdict='accepted';
-    else if(rejected>validators.length-quorum) { pending.verdict='rejected'; pending.rejectReason=[...pending.receipts.values()].filter(r=>!r.accepted).map(r=>`${r.validatorId}:${r.reason}`).join(' | '); }
-    if(pending.verdict){ clearTimeout(pending.timeoutId); drainCommits(pending.command.playerId); }
+function applyVerificationCertificate(certificate){
+    if(!certificate||certificate.signalProtocol!==SIGNAL_PROTOCOL||certificate.playerId==null||certificate.assignmentId==null) return;
+    const pending=pendingById.get(certificate.commandId);
+    if(!pending){ orphanCertificates.set(certificate.commandId,certificate); setTimeout(()=>orphanCertificates.delete(certificate.commandId),10000); return; }
+    const command=pending.command;
+    if(certificate.playerId!==command.playerId||certificate.sequence!==command.sequence||certificate.assignmentId!==command.assignmentId){ invalidCounter++; log('t-err',`certificate mismatch id=${certificate.commandId}`); return; }
+    pending.verdict=certificate.verdict==='accepted'?'accepted':'rejected';
+    pending.certificateServerTime=Number.isFinite(certificate.serverTime)?certificate.serverTime:null;
+    pending.rejectReason=pending.verdict==='accepted'?null:'server quorum certificate rejected';
+    clearTimeout(pending.timeoutId);
+    log(pending.verdict==='accepted'?'t-audit':'t-warn',`CERTIFICATE ${pending.verdict.toUpperCase()} seq=${command.sequence} id=${command.commandId}`);
+    drainCommits(command.playerId);
 }
 function drainCommits(playerId){
     while(true){
@@ -724,9 +753,9 @@ function commitCommand(command,pending){
 
     // 이동·사격 명령이 대기 중일 때 피격되더라도 옛 HP로 되돌리지 않는다.
     if(command.type==='move'||command.type==='shoot'){
-        state={...state,hp:current.hp,alive:current.alive,lifeId:current.lifeId,deadObservedAt:current.deadObservedAt};
+        state={...state,hp:current.hp,alive:current.alive,lifeId:current.lifeId,deadObservedAt:current.deadObservedAt,deadServerAt:Number(current.deadServerAt)||0};
     }else if(command.type==='heal'){
-        state={...state,hp:current.alive?Math.min(MAX_HP,current.hp+1):current.hp,alive:current.alive,lifeId:current.lifeId,deadObservedAt:current.deadObservedAt};
+        state={...state,hp:current.alive?Math.min(MAX_HP,current.hp+1):current.hp,alive:current.alive,lifeId:current.lifeId,deadObservedAt:current.deadObservedAt,deadServerAt:Number(current.deadServerAt)||0};
     }
 
     confirmedWorld[command.playerId]=state;
@@ -741,7 +770,7 @@ function commitCommand(command,pending){
     removePending(command);
     confirmedCounter++;
     const latency=Math.max(0,performance.now()-pending.receivedAt); commitLatencySamples.push(latency); if(commitLatencySamples.length>COMMIT_LATENCY_SAMPLES) commitLatencySamples.shift();
-    if(command.type==='shoot'&&command.claimedHitId) registerConfirmedHit(command);
+    if(command.type==='shoot'&&command.claimedHitId) registerConfirmedHit(command,pending.certificateServerTime);
     if(command.type==='respawn') onRespawnCommitted(command,state);
     log('t-audit',`CONFIRMED seq=${command.sequence} type=${command.type} id=${command.commandId}`);
 }
@@ -798,7 +827,7 @@ function rayHit(originX,originY,dirX,dirY,world,excludeId){
 }
 
 function contributorKey(victimId,lifeId){ return `${victimId}:${lifeId}`; }
-function registerConfirmedHit(command){
+function registerConfirmedHit(command,certificateServerTime=null){
     const victim=confirmedWorld[command.claimedHitId];
     if(!victim||!victim.alive||victim.lifeId!==command.claimedHitLifeId) return;
 
@@ -817,6 +846,7 @@ function registerConfirmedHit(command){
     if(victim.hp===0){
         victim.alive=false;
         victim.deadObservedAt=now;
+        victim.deadServerAt=Number.isFinite(certificateServerTime)?certificateServerTime:Date.now();
         delete moveState[command.claimedHitId];
         const assists=[...contributors.keys()].filter(id=>id!==command.playerId);
         registerKillOutcome(command.claimedHitId,victim.lifeId,command.playerId,assists,command.commandId);
@@ -840,106 +870,6 @@ function onRespawnCommitted(command,state){
 }
 
 function spawnBullet(command){ bullets.push({x1:command.originX,y1:command.originY,x2:command.originX+command.dirX*MAX_RANGE,y2:command.originY+command.dirY*MAX_RANGE,born:performance.now(),color:visibleWorld[command.playerId]?.color||'#fff'}); }
-
-// ===== Local dodge trainer =====
-// P2P membership/authority에는 넣지 않는다. 이동 응답성과 회피 감각을 확인하는 로컬 테스트 하네스다.
-function trainerRand(min,max){ return min+Math.random()*(max-min); }
-function trainerPointAround(center,minR=TRAINER_MIN_ORBIT,maxR=TRAINER_MAX_ORBIT){
-    const a=Math.random()*Math.PI*2,r=trainerRand(minR,maxR);
-    return clampWorldPoint(center.x+Math.cos(a)*r,center.y+Math.sin(a)*r);
-}
-function trainerCurrentPosition(bot,now=performance.now()){
-    if(bot.attack) return {x:bot.x,y:bot.y}; // 선딜 중에는 멈춰서 읽을 수 있게 한다.
-    const t=Math.max(0,Math.min(1,(now-bot.moveStart)/Math.max(1,bot.moveDuration)));
-    const eased=t*t*(3-2*t);
-    return {x:bot.fromX+(bot.toX-bot.fromX)*eased,y:bot.fromY+(bot.toY-bot.fromY)*eased};
-}
-function trainerChooseMove(bot,now,me){
-    const cur=trainerCurrentPosition(bot,now);
-    const next=trainerPointAround(me);
-    bot.x=cur.x; bot.y=cur.y;
-    bot.fromX=cur.x; bot.fromY=cur.y; bot.toX=next.x; bot.toY=next.y;
-    bot.moveStart=now+bot.pingMs*.35;
-    bot.moveDuration=trainerRand(700,1300)+bot.pingMs;
-}
-function initTrainerBots(){
-    if(TRAINER_COUNT<=0||trainerBots.length) return;
-    const me=getPredictedTail(myId)||visibleWorld[myId]; if(!me) return;
-    const now=performance.now();
-    for(let i=0;i<TRAINER_COUNT;i++){
-        const start=trainerPointAround(me,170,260),next=trainerPointAround(me);
-        trainerBots.push({id:`DODGE-${i+1}`,x:start.x,y:start.y,fromX:start.x,fromY:start.y,toX:next.x,toY:next.y,moveStart:now,moveDuration:trainerRand(700,1300),pingMs:Math.round(trainerRand(TRAINER_MIN_PING_MS,TRAINER_MAX_PING_MS)),nextPingAt:now+trainerRand(1500,3500),nextAttackAt:now+trainerRand(800,1800),attack:null,flashUntil:0});
-    }
-    log('t-sys',`dodge trainer enabled bots=${TRAINER_COUNT} windup=${TRAINER_WINDUP_MIN_MS}-${TRAINER_WINDUP_MAX_MS}ms ping=${TRAINER_MIN_PING_MS}-${TRAINER_MAX_PING_MS}ms`);
-}
-function tickTrainer(){
-    if(!roomReady||TRAINER_COUNT<=0) return;
-    initTrainerBots();
-    const me=getRenderPosition(myId)||getPredictedTail(myId); if(!me) return;
-    const now=performance.now();
-    for(const bot of trainerBots){
-        if(now>=bot.nextPingAt){ bot.pingMs=Math.round(trainerRand(TRAINER_MIN_PING_MS,TRAINER_MAX_PING_MS)); bot.nextPingAt=now+trainerRand(1600,3800); }
-        if(!bot.attack){
-            const cur=trainerCurrentPosition(bot,now); bot.x=cur.x; bot.y=cur.y;
-            if(now>=bot.moveStart+bot.moveDuration) trainerChooseMove(bot,now,me);
-            if(now>=bot.nextAttackAt){
-                // 조준점은 선딜 시작 순간에 고정한다. 이후 플레이어를 추적하지 않으므로 집중하면 피할 수 있다.
-                const jitterRadius=Math.random()<.72?trainerRand(0,9):trainerRand(12,34);
-                const jitterAngle=Math.random()*Math.PI*2;
-                const aim=clampWorldPoint(me.x+Math.cos(jitterAngle)*jitterRadius,me.y+Math.sin(jitterAngle)*jitterRadius);
-                const windup=Math.round(trainerRand(TRAINER_WINDUP_MIN_MS,TRAINER_WINDUP_MAX_MS));
-                bot.attack={startedAt:now,fireAt:now+windup+bot.pingMs,targetX:aim.x,targetY:aim.y,originX:bot.x,originY:bot.y,windupMs:windup};
-                bot.x=bot.attack.originX; bot.y=bot.attack.originY;
-                log('t-cmd',`TRAINER aim ${bot.id} ping=${bot.pingMs}ms windup=${windup}ms target=${aim.x.toFixed(0)},${aim.y.toFixed(0)}`);
-            }
-        }else if(now>=bot.attack.fireAt){
-            const a=bot.attack;
-            const player=getRenderPosition(myId)||getPredictedTail(myId);
-            const miss=player?Math.hypot(player.x-a.targetX,player.y-a.targetY):Infinity;
-            const hit=miss<=TRAINER_HIT_RADIUS;
-            if(hit){ trainerHits++; hitFlashes[myId]=now+180; }
-            else trainerDodges++;
-            trainerShots.push({x1:a.originX,y1:a.originY,x2:a.targetX,y2:a.targetY,born:now,hit});
-            log(hit?'t-warn':'t-audit',`TRAINER ${hit?'HIT':'DODGE'} ${bot.id} miss=${miss.toFixed(1)} ping=${bot.pingMs}ms`);
-            bot.flashUntil=now+160;
-            bot.attack=null;
-            bot.nextAttackAt=now+trainerRand(TRAINER_FIRE_GAP_MIN_MS,TRAINER_FIRE_GAP_MAX_MS)+bot.pingMs;
-            trainerChooseMove(bot,now,me);
-        }
-    }
-}
-function drawTrainer(now){
-    for(let i=trainerShots.length-1;i>=0;i--){
-        const shot=trainerShots[i],age=now-shot.born;
-        if(age>220){ trainerShots.splice(i,1); continue; }
-        context.save(); context.globalAlpha=1-age/220; context.strokeStyle=shot.hit?'#ef5b6e':'#7aa5ff'; context.lineWidth=2.2;
-        context.beginPath(); context.moveTo(shot.x1,shot.y1); context.lineTo(shot.x2,shot.y2); context.stroke(); context.restore();
-    }
-    for(const bot of trainerBots){
-        const p=trainerCurrentPosition(bot,now); bot.x=p.x; bot.y=p.y;
-        if(bot.attack){
-            const a=bot.attack,total=Math.max(1,a.fireAt-a.startedAt),progress=Math.max(0,Math.min(1,(now-a.startedAt)/total));
-            const remain=Math.max(0,a.fireAt-now);
-            context.save();
-            context.setLineDash([6,5]); context.strokeStyle=progress>.72?'rgba(239,91,110,.95)':'rgba(242,169,59,.72)'; context.lineWidth=1.7;
-            context.beginPath(); context.moveTo(a.originX,a.originY); context.lineTo(a.targetX,a.targetY); context.stroke(); context.setLineDash([]);
-            const pulse=TRAINER_HIT_RADIUS+10*(1-progress);
-            context.beginPath(); context.arc(a.targetX,a.targetY,pulse,0,Math.PI*2); context.strokeStyle=progress>.72?'rgba(239,91,110,.95)':'rgba(242,169,59,.82)'; context.lineWidth=2; context.stroke();
-            context.font='10px monospace'; context.fillStyle=progress>.72?'#ef5b6e':'#f2a93b'; context.fillText(`${Math.ceil(remain)}ms`,a.targetX+22,a.targetY-8);
-            context.restore();
-        }
-        context.save();
-        context.beginPath(); context.arc(p.x,p.y,8,0,Math.PI*2); context.fillStyle=now<bot.flashUntil?'#fff':'#c77dff'; context.fill();
-        context.lineWidth=1.5; context.strokeStyle=bot.attack?'#f2a93b':'#7aa5ff'; context.stroke();
-        context.font='9px monospace'; context.fillStyle='#aeb9c1'; context.fillText(`${bot.id} ${bot.pingMs}ms`,p.x+11,p.y+3);
-        context.restore();
-    }
-    if(TRAINER_COUNT>0){
-        context.save(); context.font='11px monospace'; context.fillStyle='rgba(201,214,224,.88)';
-        context.fillText(`DODGE TRAINER  hit ${trainerHits} / dodge ${trainerDodges}`,18,WORLD_HEIGHT-18); context.restore();
-    }
-}
-
 function buildMoveProfile(distance,startSpeed){
     const d=Math.max(0,distance);
     const v0=Math.max(0,startSpeed);
@@ -1108,11 +1038,11 @@ function hasPendingType(playerId,type){ return (pendingOrderByPlayer.get(playerI
 
 function sendSnapshot(remoteId){
     const peer=peers.get(remoteId); if(peer?.dc?.readyState!=='open') return;
-    const state=confirmedWorld[myId]; const snapshot={protocol:PROTOCOL,senderId:myId,clockTick:currentTick(),state:{...state,deadObservedAt:0},stateHash:stateHash(state)};
+    const state=confirmedWorld[myId]; const snapshot={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,clockTick:currentTick(),state:{...state,deadObservedAt:0},stateHash:stateHash(state)};
     safeDataSend(remoteId,{kind:'snapshot',snapshot});
 }
 function receiveSnapshot(remoteId,snapshot){
-    if(!snapshot||snapshot.protocol!==PROTOCOL||snapshot.senderId!==remoteId||!snapshot.state) return;
+    if(!snapshot||snapshot.protocol!==PROTOCOL||snapshot.rulesetRevision!==RULESET_REVISION||snapshot.senderId!==remoteId||!snapshot.state) return;
     relayWorld.delete(remoteId);
     const state=snapshot.state;
     if(![state.x,state.y].every(Number.isFinite)||!Number.isSafeInteger(state.sequence)||!Number.isSafeInteger(state.lifeId)||!Number.isSafeInteger(state.hp)) return;
@@ -1136,13 +1066,18 @@ function safeDataSend(remoteId,message){
     try{ const payload=JSON.stringify(message); peer.dc.send(payload); noteTraffic('tx',message.kind,byteLength(payload)); return true; }
     catch(error){ log('t-sys',`send skipped peer=${remoteId}: ${error.message}`); removePeer(remoteId,'send failed'); return false; }
 }
-function broadcast(message){ for(const [id,peer] of [...peers]) if(peer.dc?.readyState==='open') safeDataSend(id,message); }
+function receiveBotTelegraph(remoteId,telegraph){
+    if(!telegraph||telegraph.protocol!==PROTOCOL||telegraph.botId!==remoteId) return;
+    if(!Number.isFinite(telegraph.targetX)||!Number.isFinite(telegraph.targetY)||!Number.isFinite(telegraph.leadMs)) return;
+    const leadMs=Math.max(150,Math.min(2500,telegraph.leadMs));
+    botTelegraphs.set(remoteId,{...telegraph,receivedAt:performance.now(),fireAt:performance.now()+leadMs,expiresAt:performance.now()+leadMs+260});
+}
 function handleWireMessage(remoteId,raw){
     let message; try{ if(typeof raw!=='string'||raw.length>128*1024) throw new Error('message too large'); message=JSON.parse(raw); noteTraffic('rx',message.kind,byteLength(raw)); }catch(error){ invalidCounter++; log('t-err',`invalid JSON from=${remoteId}: ${error.message}`); return; }
     if(message.kind==='command') receiveCommand(remoteId,message.command);
-    else if(message.kind==='receipt') receiveReceipt(remoteId,message.receipt);
     else if(message.kind==='snapshot') receiveSnapshot(remoteId,message.snapshot);
     else if(message.kind==='neighborDigest') receiveNeighborDigest(remoteId,message.digest);
+    else if(message.kind==='botTelegraph') receiveBotTelegraph(remoteId,message.telegraph);
     else invalidCounter++;
 }
 
@@ -1172,10 +1107,10 @@ function connectSignaling(){
     socket.onopen=()=>{
         if(generation!==signalingGeneration) return; clearTimeout(signalConnectTimeout); signalReconnectAttempt=0; updateSignalStatus('joining','checking room'); signalLog('t-sig',`open url=${SIGNAL_URL}`);
         setRoomGate('checking','방 확인 중',`방 ${ROOM_ID} 참가 확인을 기다리는 중입니다.`);
-        socket.send(JSON.stringify({type:'join',channelId:ROOM_ID,peerId:myId,signalProtocol:SIGNAL_PROTOCOL})); signalLog('t-sig',`join sent room=${ROOM_ID} peer=${myId}`);
+        socket.send(JSON.stringify({type:'join',channelId:ROOM_ID,peerId:myId,signalProtocol:SIGNAL_PROTOCOL,rulesetRevision:RULESET_REVISION,aoiRadius:AOI_RADIUS})); signalLog('t-sig',`join sent room=${ROOM_ID} peer=${myId}`);
         roomJoinTimeout=setTimeout(()=>{
             if(generation!==signalingGeneration||roomReady) return;
-            markRoomUnavailable('방 확인 시간 초과','서버가 join 확인 응답(joined)을 보내지 않았습니다. signaling protocol v2 서버가 필요합니다.');
+            markRoomUnavailable('방 확인 시간 초과','서버가 join 확인 응답(joined)을 보내지 않았습니다. signaling protocol v4 policy/certificate 서버가 필요합니다.');
             updateSignalStatus('error','join timeout');
             signalLog('t-err',`room join timeout: missing joined ACK room=${ROOM_ID}`);
             try{ socket.close(4408,'join acknowledgement timeout'); }catch(_){}
@@ -1195,41 +1130,66 @@ function scheduleReconnect(reason){
 async function handleSignalMessage(message){
     if(!message) return;
     if(message.type==='joined'){
-        if(message.signalProtocol!==SIGNAL_PROTOCOL||message.channelId!==ROOM_ID||message.peerId!==myId){ markRoomUnavailable('방 확인 응답 불일치','서버가 다른 방 또는 프로토콜의 응답을 보냈습니다.'); return; }
+        if(message.signalProtocol!==SIGNAL_PROTOCOL||message.channelId!==ROOM_ID||message.peerId!==myId||message.rulesetRevision!==RULESET_REVISION){ markRoomUnavailable('방 확인 응답 불일치','서버가 다른 방/프로토콜/ruleset 응답을 보냈습니다.'); return; }
         clearTimeout(roomJoinTimeout); roomReady=true; updateSignalStatus('open','joined');
         serverMembershipEpoch=typeof message.membershipEpoch==='string'?message.membershipEpoch:null;
         serverPeerCount=Number.isFinite(message.peerCount)?message.peerCount:0;
+        serverMembershipRoot=typeof message.membershipRoot==='string'?message.membershipRoot:null;
+        applyPolicyView(message);
+        await applyTopologyAssignment(message.selfPolicy||{},'joined');
         const roomResult=message.roomExisted?'기존 방 확인됨':'새 방 생성됨';
-        const epochLabel=serverMembershipEpoch?` · epoch ${serverMembershipEpoch}`:'';
-        setRoomGate('ready',roomResult,`현재 참가자 ${serverPeerCount}명${epochLabel}`);
-        signalLog('t-sig',`joined room=${ROOM_ID} existed=${Boolean(message.roomExisted)} peers=${serverPeerCount} epoch=${serverMembershipEpoch||'n/a'}`);
-        sendSignal({type:'announce'});
-        clearInterval(signalKeepaliveTimer); signalKeepaliveTimer=setInterval(()=>sendSignal({type:'keepalive',to:myId}),SIGNAL_KEEPALIVE_MS);
+        setRoomGate('ready',roomResult,`현재 참가자 ${serverPeerCount}명 · topology ${selfTopologyPolicy?.topologyEpoch??'-'}`);
+        signalLog('t-sig',`joined room=${ROOM_ID} peers=${serverPeerCount} assignment=${selfTopologyPolicy?.assignmentId||'n/a'}`);
+        clearInterval(signalKeepaliveTimer); signalKeepaliveTimer=setInterval(()=>sendSignal({type:'keepalive'}),SIGNAL_KEEPALIVE_MS);
+        sendPresence();
         return;
     }
     if(message.type==='join-error'){
         clearTimeout(roomJoinTimeout); markRoomUnavailable('방 확인 실패',message.reason||'서버가 참가를 거절했습니다.'); updateSignalStatus('error','join rejected'); signalLog('t-err',`join rejected: ${message.reason||'unknown'}`); return;
     }
-    if(message.type==='membership-update'){
-        if(message.channelId!==ROOM_ID||message.signalProtocol!==SIGNAL_PROTOCOL) return;
+    if(message.type==='topology-update'){
+        if(message.channelId!==ROOM_ID||message.signalProtocol!==SIGNAL_PROTOCOL||message.peerId!==myId) return;
         serverMembershipEpoch=typeof message.membershipEpoch==='string'?message.membershipEpoch:serverMembershipEpoch;
+        serverMembershipRoot=typeof message.membershipRoot==='string'?message.membershipRoot:serverMembershipRoot;
         serverPeerCount=Number.isFinite(message.peerCount)?message.peerCount:serverPeerCount;
-        signalLog('t-sig',`membership update peers=${serverPeerCount} epoch=${serverMembershipEpoch||'n/a'}`);
+        applyPolicyView(message);
+        await applyTopologyAssignment(message.selfPolicy||{},message.reason||'update');
+        refreshMembership('server topology update');
+        signalLog('t-sig',`topology base=${desiredTopologyPeers.size} sim=${desiredSimulationPeers.size} direct=${desiredDirectPeers.size} assignment=${selfTopologyPolicy?.assignmentId||'n/a'}`);
         return;
     }
+    if(message.type==='verification-certificate'){ applyVerificationCertificate(message); return; }
+    if(message.type==='membership-summary'){ if(message.channelId===ROOM_ID){ serverPeerCount=Number.isFinite(message.peerCount)?message.peerCount:serverPeerCount; serverMembershipEpoch=typeof message.membershipEpoch==='string'?message.membershipEpoch:serverMembershipEpoch; serverMembershipRoot=typeof message.membershipRoot==='string'?message.membershipRoot:serverMembershipRoot; refreshMembership('membership summary'); } return; }
+    if(message.type==='relay-error'){ signalLog('t-warn',`relay rejected to=${message.to||'-'} reason=${message.reason||'unknown'}`); return; }
     if(!roomReady||message.from===myId||typeof message.from!=='string'||(message.to&&message.to!==myId)) return;
     try{
-        if(message.type==='announce'){
-            signalLog('t-sig',`announce received from=${message.from}`);
-            if(myId<message.from&&!peers.has(message.from)) await createPeer(message.from,true);
-            else if(!peers.has(message.from)) peers.set(message.from,{pc:null,dc:null,state:'awaiting-offer',remoteId:message.from,pendingIce:[]});
-        }else if(message.type==='offer') await createPeer(message.from,false,message.sdp);
+        if(message.type==='offer') await createPeer(message.from,false,message.sdp);
         else if(message.type==='answer'){ const peer=peers.get(message.from); if(peer?.pc){ await peer.pc.setRemoteDescription(message.sdp); await flushIce(peer); } }
         else if(message.type==='ice'){
             const peer=peers.get(message.from); if(peer?.pc){ if(peer.pc.remoteDescription) await peer.pc.addIceCandidate(message.candidate); else peer.pendingIce.push(message.candidate); }
             else{ const list=prePeerIce.get(message.from)||[]; list.push(message.candidate); prePeerIce.set(message.from,list); }
-        }else if(message.type==='leave') removePeer(message.from,'signaling leave');
+        }
     }catch(error){ signalLog('t-err',`handling failed type=${message.type} from=${message.from}: ${error.message}`); }
+}
+async function applyTopologyAssignment(policy,reason='update'){
+    const topology=new Set((Array.isArray(policy?.topologyPeers)?policy.topologyPeers:[]).filter(id=>typeof id==='string'&&id!==myId));
+    const simulation=new Set((Array.isArray(policy?.simulationPeers)?policy.simulationPeers:[]).filter(id=>typeof id==='string'&&id!==myId));
+    const next=new Set((Array.isArray(policy?.directPeers)?policy.directPeers:[...topology,...simulation]).filter(id=>typeof id==='string'&&id!==myId).slice(0,24));
+    desiredTopologyPeers.clear(); for(const id of topology) desiredTopologyPeers.add(id);
+    desiredSimulationPeers.clear(); for(const id of simulation) desiredSimulationPeers.add(id);
+    desiredDirectPeers.clear(); for(const id of next) desiredDirectPeers.add(id);
+    for(const id of [...peers.keys()]) if(!next.has(id)) removePeer(id,`topology removed: ${reason}`);
+    for(const id of next){
+        if(peers.has(id)) continue;
+        if(myId<id) await createPeer(id,true);
+        else peers.set(id,{pc:null,dc:null,state:'awaiting-offer',remoteId:id,pendingIce:[...(prePeerIce.get(id)||[])]});
+    }
+    updatePeerList();
+}
+function sendPresence(){
+    if(!roomReady) return;
+    const me=getPredictedTail(myId)||confirmedWorld[myId];
+    if(me) sendSignal({type:'presence',x:round6(me.x),y:round6(me.y),aoiRadius:AOI_RADIUS});
 }
 function reconnectSignaling(){
     clearTimeout(signalReconnectTimer); clearTimeout(signalConnectTimeout); clearTimeout(roomJoinTimeout); clearInterval(signalKeepaliveTimer); roomReady=false; setRoomGate('checking','방 확인 중',`방 ${ROOM_ID}에 다시 연결합니다.`); signalManualClose=false;
@@ -1258,7 +1218,7 @@ async function createPeer(remoteId,isOfferer,remoteSdp){
         dc.onclose=()=>{ if(!pageUnloading&&peers.get(remoteId)===entry) removePeer(remoteId,'data channel closed'); };
         dc.onerror=event=>{ if(!pageUnloading) log('t-err',`DataChannel error ↔ ${remoteId}: ${event?.message||'unknown'}`); };
     };
-    if(isOfferer){ bindChannel(pc.createDataChannel('arena-v12',{ordered:true})); const offer=await pc.createOffer(); await pc.setLocalDescription(offer); sendSignal({type:'offer',to:remoteId,sdp:offer}); }
+    if(isOfferer){ bindChannel(pc.createDataChannel('arena-v13',{ordered:true})); const offer=await pc.createOffer(); await pc.setLocalDescription(offer); sendSignal({type:'offer',to:remoteId,sdp:offer}); }
     else{ pc.ondatachannel=event=>bindChannel(event.channel); await pc.setRemoteDescription(remoteSdp); await flushIce(entry); const answer=await pc.createAnswer(); await pc.setLocalDescription(answer); sendSignal({type:'answer',to:remoteId,sdp:answer}); }
     updatePeerList();
 }
@@ -1308,7 +1268,19 @@ function draw(){
     beginWorldFrame(); const now=performance.now();
     const localRender=getRenderPosition(myId); if(localRender){ context.beginPath(); context.arc(localRender.x,localRender.y,AOI_RADIUS,0,Math.PI*2); context.strokeStyle='rgba(61,220,151,.32)'; context.lineWidth=1.5; context.setLineDash([6,6]); context.stroke(); context.setLineDash([]); }
     for(let i=bullets.length-1;i>=0;i--){ const bullet=bullets[i],age=now-bullet.born; if(age>BULLET_TRAIL_MS){ bullets.splice(i,1); continue; } context.globalAlpha=1-age/BULLET_TRAIL_MS; context.strokeStyle=bullet.color; context.lineWidth=1.5; context.beginPath(); context.moveTo(bullet.x1,bullet.y1); context.lineTo(bullet.x2,bullet.y2); context.stroke(); context.globalAlpha=1; }
-    drawTrainer(now);
+    // Server-side bot prefire hint. Purely visual: shot authority still comes from the normal shoot command.
+    for(const [botId,t] of [...botTelegraphs]){
+        if(t.expiresAt<=now){ botTelegraphs.delete(botId); continue; }
+        const bot=getRenderPosition(botId)||visibleWorld[botId]||confirmedWorld[botId]; if(!bot) continue;
+        const remaining=Math.max(0,t.fireAt-now), ratio=Math.max(0,Math.min(1,remaining/Math.max(1,t.leadMs)));
+        context.save();
+        context.globalAlpha=.35+.45*(1-ratio);
+        context.strokeStyle='#c77dff'; context.lineWidth=2; context.setLineDash([5,5]);
+        context.beginPath(); context.moveTo(bot.x,bot.y); context.lineTo(t.targetX,t.targetY); context.stroke();
+        context.setLineDash([]); context.beginPath(); context.arc(t.targetX,t.targetY,18+8*ratio,0,Math.PI*2); context.stroke();
+        context.font='9px monospace'; context.fillStyle='#c77dff'; context.fillText(`LOCK ${Math.ceil(remaining)}ms · ping ${Math.round(t.pingMs||0)}ms`,t.targetX+22,t.targetY-8);
+        context.restore();
+    }
     // 1.5-hop 상태는 발견/사전 로딩용 유령 표시일 뿐, 전투 판정에는 절대 들어가지 않는다.
     const localState=visibleWorld[myId];
     for(const entry of relayWorld.values()){
@@ -1346,7 +1318,7 @@ function displayName(id){ return id===myId?`${id} (나)`:id; }
 function updatePeerList(){
     document.getElementById('connCount').textContent=[...peers.values()].filter(peer=>peer.dc?.readyState==='open').length; const element=document.getElementById('peerList'); element.textContent='';
     if(!peers.size){ const empty=document.createElement('span'); empty.style.color='var(--dim)'; empty.textContent='다른 유저 대기 중...'; element.appendChild(empty); return; }
-    for(const [id,peer] of peers){ const row=document.createElement('div'); row.className='peerRow'; const connected=peer.dc?.readyState==='open'; const left=document.createElement('span'); const dot=document.createElement('span'); dot.className='dot'; dot.style.background=connected?'var(--accent)':'var(--warn)'; left.append(dot,document.createTextNode(id)); const right=document.createElement('span'); right.textContent=connected?(isInLocalAoi(id)?'AOI':'far'):peer.state; right.style.color=connected?'var(--accent)':'var(--warn)'; row.append(left,right); element.appendChild(row); }
+    for(const [id,peer] of peers){ const row=document.createElement('div'); row.className='peerRow'; const connected=peer.dc?.readyState==='open'; const left=document.createElement('span'); const dot=document.createElement('span'); dot.className='dot'; dot.style.background=connected?'var(--accent)':'var(--warn)'; left.append(dot,document.createTextNode(id)); const right=document.createElement('span'); right.textContent=connected?(desiredSimulationPeers.has(id)?'SIM/AOI':desiredTopologyPeers.has(id)?'TOPO':'direct'):peer.state; right.style.color=connected?'var(--accent)':'var(--warn)'; row.append(left,right); element.appendChild(row); }
 }
 
 const logElement=document.getElementById('log'); const logEmpty=document.getElementById('logEmpty');
@@ -1371,7 +1343,7 @@ window.setLogFilter=setLogFilter; window.clearLogs=clearLogs;
 
 function shutdown(){
     if(pageUnloading) return; pageUnloading=true; signalManualClose=true;
-    for(const [id] of peers) sendSignal({type:'leave',to:id});
+    try{ sendSignal({type:'leave'}); }catch(_){}
     for(const [id] of [...peers]) removePeer(id,'page unload');
     clearTimeout(signalReconnectTimer); clearTimeout(signalConnectTimeout); clearTimeout(roomJoinTimeout); clearInterval(signalKeepaliveTimer); try{signalingSocket?.close(1000,'page unload');}catch(_){}
 }
@@ -1379,17 +1351,17 @@ window.addEventListener('pagehide',shutdown); window.addEventListener('beforeunl
 
 setInterval(tickMovement,STEP_INTERVAL_MS);
 setInterval(tickCombat,100);
-setInterval(tickTrainer,50);
 setInterval(renderLogs,150);
 setInterval(updateKda,1000);
-setInterval(()=>{ pruneRelayWorld(); broadcastNeighborDigests(); },RELAY_INTERVAL_MS);
+setInterval(()=>{ pruneRelayWorld(); pruneServerPolicies(); broadcastNeighborDigests(); },RELAY_INTERVAL_MS);
+setInterval(sendPresence,PRESENCE_INTERVAL_MS);
 setInterval(()=>document.getElementById('tick').textContent=`TICK ${currentTick()}`,100);
 setInterval(()=>{
     const descriptor=membershipDescriptor();
-    const localCommittee=validatorsFor({membershipIds:descriptor.membershipIds,membershipHash:descriptor.membershipHash,epochId:descriptor.epochId,playerId:myId,sequence:localSequence+1,previousStateHash:stateHash(getPredictedTail(myId)||confirmedWorld[myId])});
-    document.getElementById('epochStat').textContent=descriptor.epochId;
-    document.getElementById('aoiPeerStat').textContent=`${localAoiPeerIds().length} / ${Math.max(0,descriptor.membershipIds.length-1)}`;
-    document.getElementById('committeeStat').textContent=`${localCommittee.join(',')||myId} · q${Math.floor(localCommittee.length/2)+1}`;
+    const localCommittee=[...(selfTopologyPolicy?.validatorIds||[])];
+    document.getElementById('epochStat').textContent=`m:${serverMembershipEpoch||'-'} / t:${selfTopologyPolicy?.topologyEpoch??'-'}`;
+    document.getElementById('aoiPeerStat').textContent=`${localAoiPeerIds().length} / ${directOpenPeerIds().length} direct · ${serverPeerCount} room`;
+    document.getElementById('committeeStat').textContent=`${localCommittee.join(',')||'-'} · q${selfTopologyPolicy?.quorum||0}`;
     document.getElementById('confirmedStat').textContent=confirmedCounter;
     document.getElementById('tentativeStat').textContent=pendingById.size;
     document.getElementById('rejectedStat').textContent=rejectedCounter;
@@ -1404,10 +1376,9 @@ setInterval(()=>{
     document.getElementById('checkpointStat').textContent=`${networkMetrics.lastCheckpointPlayers} players`;
     document.getElementById('relayMetricStat').textContent=`${relayAcceptedCounter} / ${relayDroppedCounter}`;
 },500);
-setInterval(()=>{ if(signalingSocket?.readyState===WebSocket.OPEN) sendSignal({type:'announce'}); },3000);
 setInterval(()=>{ networkMetrics.txRate=networkMetrics.txMessagesWindow; networkMetrics.rxRate=networkMetrics.rxMessagesWindow; networkMetrics.txByteRate=networkMetrics.txBytesWindow; networkMetrics.rxByteRate=networkMetrics.rxBytesWindow; networkMetrics.txMessagesWindow=networkMetrics.rxMessagesWindow=networkMetrics.txBytesWindow=networkMetrics.rxBytesWindow=0; },1000);
 
-log('t-sys',`local peer boot id=${myId} protocol=${PROTOCOL} signalProtocol=${SIGNAL_PROTOCOL} room=${ROOM_ID} world=${WORLD_WIDTH}x${WORLD_HEIGHT} margin=${WORLD_MARGIN} aoi=${AOI_RADIUS} committee=${COMMITTEE_SIZE} relay=1.5-hop`);
+log('t-sys',`local peer boot id=${myId} protocol=${PROTOCOL} ruleset=${RULESET_REVISION} signalProtocol=${SIGNAL_PROTOCOL} room=${ROOM_ID} world=${WORLD_WIDTH}x${WORLD_HEIGHT} margin=${WORLD_MARGIN} aoi=${AOI_RADIUS} committee=${COMMITTEE_SIZE} relay=1.5-hop`);
 </script>
 
 <script type="application/json" id="architectureIdeaIndex">
