@@ -1,55 +1,66 @@
-'use strict';
+from pathlib import Path
+import json, shutil, zipfile, re
 
-const fs=require('fs');
-const path=require('path');
-const http=require('http');
-const {spawn}=require('child_process');
+base = Path("/mnt/data")
+deploy = base / "mmo-server-clean"
+if deploy.exists():
+    shutil.rmtree(deploy)
+deploy.mkdir()
 
-const BOT_COUNT=Math.max(0,Number(process.env.BOT_COUNT)||0);
-const PORT=Number(process.env.PORT)||8090;
-const requested=process.env.SIGNAL_SERVER_FILE;
-const candidates=[requested,'signaling-server.js','signaling-server.js'].filter(Boolean).map(x=>path.join(__dirname,x));
-const signalFile=candidates.find(fs.existsSync);
-if(!signalFile){ console.error('[start-v5] signaling server file not found'); process.exit(1); }
+# Use the current signal-protocol-5 server that matches the AUTO browser client.
+server_src = base / "mmo-server-v5-deploy" / "signaling-server.js"
+server_dst = deploy / "signaling-server.js"
+shutil.copyfile(server_src, server_dst)
 
-console.log(`[start-v5] signal=${path.basename(signalFile)} bots=${BOT_COUNT} botTransport=${process.env.BOT_TRANSPORT||'ws'}`);
-const signal=spawn(process.execPath,[signalFile],{stdio:'inherit',env:process.env});
-let bots=null,stopping=false;
+package = {
+    "name": "p2p-mmo-signaling",
+    "version": "0.5.1",
+    "description": "PSSF sparse signaling server for browser-native manual/auto peers",
+    "main": "signaling-server.js",
+    "scripts": {
+        "start": "node signaling-server.js"
+    },
+    "dependencies": {
+        "ws": "^8.18.0"
+    }
+}
+(deploy / "package.json").write_text(
+    json.dumps(package, ensure_ascii=False, indent=2) + "\n",
+    encoding="utf-8"
+)
 
-function probeSignal(){
-  return new Promise(resolve=>{
-    const req=http.get({host:'127.0.0.1',port:PORT,path:'/',timeout:800},res=>{
-      let body=''; res.on('data',c=>body+=c); res.on('end',()=>{
-        try{ const data=JSON.parse(body); resolve(res.statusCode===200&&data.signalProtocol===5); }
-        catch{ resolve(false); }
-      });
-    });
-    req.on('timeout',()=>{req.destroy();resolve(false);});
-    req.on('error',()=>resolve(false));
-  });
+# Cross-check protocol compatibility against canonical AUTO client.
+client_text = (base / "p2p-mmo-demo-auto.html").read_text(encoding="utf-8")
+server_text = server_dst.read_text(encoding="utf-8")
+checks = {
+    "client_signal_5": "const SIGNAL_PROTOCOL = 5;" in client_text,
+    "client_protocol_13": "const PROTOCOL = 13;" in client_text,
+    "client_ruleset": "const RULESET_REVISION = 'pssf-v13-r1';" in client_text,
+    "server_signal_5": "const SIGNAL_PROTOCOL = 5;" in server_text,
+    "server_ruleset": "const RULESET_REVISION = 'pssf-v13-r1';" in server_text,
+    "package_direct_start": '"start": "node signaling-server.js"' in (deploy / "package.json").read_text(encoding="utf-8"),
 }
-async function waitForSignal(){
-  const deadline=Date.now()+15000;
-  while(Date.now()<deadline){
-    if(await probeSignal()) return true;
-    await new Promise(r=>setTimeout(r,200));
-  }
-  return false;
-}
-async function startBots(){
-  if(BOT_COUNT<=0) return;
-  if(!(await waitForSignal())){ console.error('[start-v5] signaling readiness timeout; bots not started'); stop('SIGTERM'); process.exit(1); }
-  const env={...process.env,SIGNAL_URL:process.env.BOT_SIGNAL_URL||`ws://127.0.0.1:${PORT}`,BOT_COUNT:String(BOT_COUNT)};
-  console.log(`[start-v5] signaling ready; starting bots url=${env.SIGNAL_URL}`);
-  bots=spawn(process.execPath,[path.join(__dirname,'server-bots','bot-runner.js')],{stdio:'inherit',env});
-  bots.on('exit',(c,s)=>{ console.log(`[start-v5] bot runner exited code=${c} signal=${s||'-'}`); if(!stopping&&c!==0) process.exitCode=1; });
-}
-function stop(sig){
-  if(stopping) return; stopping=true;
-  try{bots?.kill(sig);}catch{}
-  try{signal.kill(sig);}catch{}
-}
-process.on('SIGTERM',()=>stop('SIGTERM'));
-process.on('SIGINT',()=>stop('SIGINT'));
-signal.on('exit',(code)=>{ try{bots?.kill('SIGTERM');}catch{} if(!stopping||code) process.exit(code??1); });
-startBots().catch(err=>{ console.error('[start-v5] startup failed',err); stop('SIGTERM'); process.exit(1); });
+
+if not all(checks.values()):
+    raise RuntimeError(f"compatibility check failed: {checks}")
+
+# Ensure forbidden legacy bot startup references do not exist in clean deployment.
+combined = (deploy / "package.json").read_text(encoding="utf-8") + "\n" + server_text
+for forbidden in ["node start.js", "server-bots/bot-runner.js", "BOT_COUNT", "BOT_TRANSPORT", "werift"]:
+    if forbidden in combined:
+        raise RuntimeError(f"legacy reference remained: {forbidden}")
+
+zip_path = base / "mmo-server-clean-no-bots.zip"
+if zip_path.exists():
+    zip_path.unlink()
+with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+    z.write(deploy / "package.json", "mmo-server/package.json")
+    z.write(deploy / "signaling-server.js", "mmo-server/signaling-server.js")
+
+print("Compatibility checks:")
+for k, v in checks.items():
+    print(f"  {k}: {v}")
+print("\nFiles:")
+print("  mmo-server/package.json")
+print("  mmo-server/signaling-server.js")
+print("\nZIP:", zip_path)
