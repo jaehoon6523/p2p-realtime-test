@@ -1,8 +1,14 @@
 {
-  "name": "p2p-mmo-signaling",
-  "version": "0.1.0",
-  "description": "MMO 데모용 WebSocket 시그널링 릴레이 서버 (BroadcastChannel 대체)",
-  "main": "signaling-server.js",
-  "scripts": { "start": "node signaling-server.js" },
-  "dependencies": { "ws": "^8.18.0" }
+"name": "p2p-mmo-signaling",
+"version": "0.1.0",
+"description": "PSSF v4 sparse-topology signaling server with optional server-side bots",
+"main": "start-v4.js",
+"scripts": {
+"start": "node start-v4.js",
+"start:signal": "node signaling-server.js",
+"start:bots": "node server-bots/bot-runner.js"
+},
+"dependencies": {
+"ws": "^8.18.0"
+}
 }
