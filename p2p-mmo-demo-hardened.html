@@ -195,7 +195,7 @@ renderArchitectureConsole(); renderContractsConsole(); renderVerificationConsole
 
 
 const PROTOCOL = 13;
-const SIGNAL_PROTOCOL = 4;
+const SIGNAL_PROTOCOL = 5;
 const RULESET_REVISION = 'pssf-v13-r1';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
@@ -463,7 +463,9 @@ function refreshMembership(reason=''){
 function distanceBetweenStates(a,b){ return a&&b?Math.hypot(a.x-b.x,a.y-b.y):Infinity; }
 function isInLocalAoi(playerId){ if(playerId===myId) return true; return distanceBetweenStates(visibleWorld[myId],visibleWorld[playerId])<=AOI_RADIUS; }
 function localAoiPeerIds(){ return currentMembershipIds().filter(id=>id!==myId&&isInLocalAoi(id)); }
-function directOpenPeerIds(){ return [...peers].filter(([,peer])=>peer.dc?.readyState==='open').map(([id])=>id); }
+function peerTransport(playerId){ return currentPolicyByPeer.get(playerId)?.transport || peers.get(playerId)?.transport || 'webrtc'; }
+function isPeerOpen(playerId){ const peer=peers.get(playerId); return Boolean(peer) && (peer.transport==='ws-bot' ? peer.state==='open' : peer.dc?.readyState==='open'); }
+function directOpenPeerIds(){ return [...peers].filter(([id])=>isPeerOpen(id)).map(([id])=>id); }
 function relayRecordKey(entry){ return `${entry.ownerId}:${entry.sequence}:${entry.stateHash}`; }
 function buildRelayEntry(ownerId){
     const state=confirmedWorld[ownerId];
@@ -482,7 +484,7 @@ function buildRelayEntry(ownerId){
     };
 }
 function sendNeighborDigest(remoteId){
-    const peer=peers.get(remoteId); if(peer?.dc?.readyState!=='open') return;
+    if(!isPeerOpen(remoteId)) return;
     const recipient=confirmedWorld[remoteId]||visibleWorld[remoteId];
     const candidates=[];
     for(const ownerId of directOpenPeerIds()){
@@ -496,7 +498,7 @@ function sendNeighborDigest(remoteId){
     const entries=candidates.slice(0,RELAY_MAX_ENTRIES).map(item=>item.entry);
     safeDataSend(remoteId,{kind:'neighborDigest',digest:{protocol:PROTOCOL,senderId:myId,relayDepth:1,ttlMs:RELAY_TTL_MS,entries}});
 }
-function broadcastNeighborDigests(){ for(const id of desiredTopologyPeers) if(peers.get(id)?.dc?.readyState==='open') sendNeighborDigest(id); }
+function broadcastNeighborDigests(){ for(const id of desiredTopologyPeers) if(isPeerOpen(id)) sendNeighborDigest(id); }
 function validRelayEntry(remoteId,entry){
     return entry&&entry.sourcePeerId===remoteId&&entry.relayDepth===1&&typeof entry.ownerId==='string'&&entry.ownerId!==myId&&entry.ownerId!==remoteId&&
         Number.isSafeInteger(entry.sequence)&&entry.sequence>=0&&Number.isSafeInteger(entry.tick)&&entry.tick>=0&&
@@ -513,7 +515,7 @@ function receiveNeighborDigest(remoteId,digest){
     for(const entry of digest.entries){
         if(!validRelayEntry(remoteId,entry)){ relayDroppedCounter++; continue; }
         // 직접 연결/직접 상태가 있으면 간접 정보는 저장하지 않는다.
-        if(peers.get(entry.ownerId)?.dc?.readyState==='open'||confirmedWorld[entry.ownerId]){ relayDroppedCounter++; continue; }
+        if(isPeerOpen(entry.ownerId)||confirmedWorld[entry.ownerId]){ relayDroppedCounter++; continue; }
         const key=relayRecordKey(entry);
         const seenUntil=seenRelayRecords.get(key)||0;
         if(seenUntil>now){ relayDroppedCounter++; continue; }
@@ -528,7 +530,7 @@ function pruneRelayWorld(){
     const now=performance.now();
     for(const [key,until] of seenRelayRecords) if(until<=now) seenRelayRecords.delete(key);
     for(const [ownerId,entry] of relayWorld){
-        if(entry.expiresAt<=now||peers.get(ownerId)?.dc?.readyState==='open'||confirmedWorld[ownerId]) relayWorld.delete(ownerId);
+        if(entry.expiresAt<=now||isPeerOpen(ownerId)||confirmedWorld[ownerId]) relayWorld.delete(ownerId);
     }
 }
 function allowedStepForTicks(previousTick,commandTick){
@@ -622,7 +624,7 @@ function executeLocal(command){
     if(!command) return;
     acceptCommand(command,false);
     const policy=policyForCommand(command);
-    for(const id of policy?.directPeers||[]) if(peers.get(id)?.dc?.readyState==='open') safeDataSend(id,{kind:'command',command});
+    for(const id of policy?.directPeers||[]) if(isPeerOpen(id)) safeDataSend(id,{kind:'command',command});
 }
 function receiveCommand(remoteId,command){
     const error=validateEnvelope(remoteId,command); if(error){ invalidCounter++; log('t-err',`command rejected before audit: ${error}`); return; }
@@ -1037,7 +1039,7 @@ function tickCombat(){
 function hasPendingType(playerId,type){ return (pendingOrderByPlayer.get(playerId)||[]).some(id=>pendingById.get(id)?.command.type===type); }
 
 function sendSnapshot(remoteId){
-    const peer=peers.get(remoteId); if(peer?.dc?.readyState!=='open') return;
+    if(!isPeerOpen(remoteId)) return;
     const state=confirmedWorld[myId]; const snapshot={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,clockTick:currentTick(),state:{...state,deadObservedAt:0},stateHash:stateHash(state)};
     safeDataSend(remoteId,{kind:'snapshot',snapshot});
 }
@@ -1062,8 +1064,16 @@ function noteTraffic(direction,kind,bytes){
     const key=`${direction}:${kind||'unknown'}`; networkMetrics.byKind[key]=(networkMetrics.byKind[key]||0)+bytes;
 }
 function safeDataSend(remoteId,message){
-    const peer=peers.get(remoteId); if(peer?.dc?.readyState!=='open') return false;
-    try{ const payload=JSON.stringify(message); peer.dc.send(payload); noteTraffic('tx',message.kind,byteLength(payload)); return true; }
+    const peer=peers.get(remoteId); if(!peer||!isPeerOpen(remoteId)) return false;
+    try{
+        const payload=JSON.stringify(message);
+        if(peer.transport==='ws-bot'){
+            const sent=sendSignal({type:'wire',to:remoteId,wire:message});
+            if(sent) noteTraffic('tx',message.kind,byteLength(payload));
+            return sent;
+        }
+        peer.dc.send(payload); noteTraffic('tx',message.kind,byteLength(payload)); return true;
+    }
     catch(error){ log('t-sys',`send skipped peer=${remoteId}: ${error.message}`); removePeer(remoteId,'send failed'); return false; }
 }
 function receiveBotTelegraph(remoteId,telegraph){
@@ -1110,7 +1120,7 @@ function connectSignaling(){
         socket.send(JSON.stringify({type:'join',channelId:ROOM_ID,peerId:myId,signalProtocol:SIGNAL_PROTOCOL,rulesetRevision:RULESET_REVISION,aoiRadius:AOI_RADIUS})); signalLog('t-sig',`join sent room=${ROOM_ID} peer=${myId}`);
         roomJoinTimeout=setTimeout(()=>{
             if(generation!==signalingGeneration||roomReady) return;
-            markRoomUnavailable('방 확인 시간 초과','서버가 join 확인 응답(joined)을 보내지 않았습니다. signaling protocol v4 policy/certificate 서버가 필요합니다.');
+            markRoomUnavailable('방 확인 시간 초과','서버가 join 확인 응답(joined)을 보내지 않았습니다. signaling protocol v5 transport-policy 서버가 필요합니다.');
             updateSignalStatus('error','join timeout');
             signalLog('t-err',`room join timeout: missing joined ACK room=${ROOM_ID}`);
             try{ socket.close(4408,'join acknowledgement timeout'); }catch(_){}
@@ -1159,6 +1169,10 @@ async function handleSignalMessage(message){
         return;
     }
     if(message.type==='verification-certificate'){ applyVerificationCertificate(message); return; }
+    if(message.type==='wire'){
+        if(!roomReady||message.from===myId||typeof message.from!=='string'||message.to!==myId||!message.wire) return;
+        handleWireMessage(message.from,JSON.stringify(message.wire)); return;
+    }
     if(message.type==='membership-summary'){ if(message.channelId===ROOM_ID){ serverPeerCount=Number.isFinite(message.peerCount)?message.peerCount:serverPeerCount; serverMembershipEpoch=typeof message.membershipEpoch==='string'?message.membershipEpoch:serverMembershipEpoch; serverMembershipRoot=typeof message.membershipRoot==='string'?message.membershipRoot:serverMembershipRoot; refreshMembership('membership summary'); } return; }
     if(message.type==='relay-error'){ signalLog('t-warn',`relay rejected to=${message.to||'-'} reason=${message.reason||'unknown'}`); return; }
     if(!roomReady||message.from===myId||typeof message.from!=='string'||(message.to&&message.to!==myId)) return;
@@ -1180,11 +1194,19 @@ async function applyTopologyAssignment(policy,reason='update'){
     desiredDirectPeers.clear(); for(const id of next) desiredDirectPeers.add(id);
     for(const id of [...peers.keys()]) if(!next.has(id)) removePeer(id,`topology removed: ${reason}`);
     for(const id of next){
-        if(peers.has(id)) continue;
+        const transport=peerTransport(id);
+        const existing=peers.get(id);
+        if(existing&&existing.transport===transport) continue;
+        if(existing) removePeer(id,'transport changed');
+        if(transport==='ws-bot'){
+            peers.set(id,{transport:'ws-bot',pc:null,dc:null,state:'open',remoteId:id,pendingIce:[]});
+            relayWorld.delete(id); sendSnapshot(id);
+            continue;
+        }
         if(myId<id) await createPeer(id,true);
-        else peers.set(id,{pc:null,dc:null,state:'awaiting-offer',remoteId:id,pendingIce:[...(prePeerIce.get(id)||[])]});
+        else peers.set(id,{transport:'webrtc',pc:null,dc:null,state:'awaiting-offer',remoteId:id,pendingIce:[...(prePeerIce.get(id)||[])]});
     }
-    updatePeerList();
+    refreshMembership(`topology assignment ${reason}`); updatePeerList();
 }
 function sendPresence(){
     if(!roomReady) return;
@@ -1203,7 +1225,7 @@ async function flushIce(peer){
 }
 async function createPeer(remoteId,isOfferer,remoteSdp){
     const existing=peers.get(remoteId); if(existing?.pc&&!['closed','failed'].includes(existing.pc.connectionState)) return;
-    const pc=new RTCPeerConnection(STUN); const entry={pc,dc:null,state:'connecting',remoteId,pendingIce:[...(existing?.pendingIce||[]),...(prePeerIce.get(remoteId)||[])]}; prePeerIce.delete(remoteId); peers.set(remoteId,entry);
+    const pc=new RTCPeerConnection(STUN); const entry={transport:'webrtc',pc,dc:null,state:'connecting',remoteId,pendingIce:[...(existing?.pendingIce||[]),...(prePeerIce.get(remoteId)||[])]}; prePeerIce.delete(remoteId); peers.set(remoteId,entry);
     pc.onicecandidate=event=>{ if(event.candidate) sendSignal({type:'ice',to:remoteId,candidate:event.candidate}); };
     pc.onconnectionstatechange=()=>{
         if(pageUnloading||tearingDownPeers.has(remoteId)||peers.get(remoteId)!==entry) return; entry.state=pc.connectionState; clearTimeout(disconnectTimers.get(remoteId)); disconnectTimers.delete(remoteId);
@@ -1223,7 +1245,7 @@ async function createPeer(remoteId,isOfferer,remoteSdp){
     updatePeerList();
 }
 function removePeer(remoteId,reason='unknown'){
-    if(!remoteId||remoteId===myId||tearingDownPeers.has(remoteId)) return false; const peer=peers.get(remoteId); if(!peer) return false; tearingDownPeers.add(remoteId); const wasMember=peer.dc?.readyState==='open';
+    if(!remoteId||remoteId===myId||tearingDownPeers.has(remoteId)) return false; const peer=peers.get(remoteId); if(!peer) return false; tearingDownPeers.add(remoteId); const wasMember=isPeerOpen(remoteId);
     try{
         peers.delete(remoteId); clearTimeout(disconnectTimers.get(remoteId)); disconnectTimers.delete(remoteId);
         if(peer.dc){ peer.dc.onopen=peer.dc.onmessage=peer.dc.onclose=peer.dc.onerror=null; }
@@ -1316,9 +1338,9 @@ function renderKillFeed(){
 }
 function displayName(id){ return id===myId?`${id} (나)`:id; }
 function updatePeerList(){
-    document.getElementById('connCount').textContent=[...peers.values()].filter(peer=>peer.dc?.readyState==='open').length; const element=document.getElementById('peerList'); element.textContent='';
+    document.getElementById('connCount').textContent=directOpenPeerIds().length; const element=document.getElementById('peerList'); element.textContent='';
     if(!peers.size){ const empty=document.createElement('span'); empty.style.color='var(--dim)'; empty.textContent='다른 유저 대기 중...'; element.appendChild(empty); return; }
-    for(const [id,peer] of peers){ const row=document.createElement('div'); row.className='peerRow'; const connected=peer.dc?.readyState==='open'; const left=document.createElement('span'); const dot=document.createElement('span'); dot.className='dot'; dot.style.background=connected?'var(--accent)':'var(--warn)'; left.append(dot,document.createTextNode(id)); const right=document.createElement('span'); right.textContent=connected?(desiredSimulationPeers.has(id)?'SIM/AOI':desiredTopologyPeers.has(id)?'TOPO':'direct'):peer.state; right.style.color=connected?'var(--accent)':'var(--warn)'; row.append(left,right); element.appendChild(row); }
+    for(const [id,peer] of peers){ const row=document.createElement('div'); row.className='peerRow'; const connected=isPeerOpen(id); const left=document.createElement('span'); const dot=document.createElement('span'); dot.className='dot'; dot.style.background=connected?'var(--accent)':'var(--warn)'; left.append(dot,document.createTextNode(id)); const right=document.createElement('span'); right.textContent=connected?(peer.transport==='ws-bot'?'BOT/WS':desiredSimulationPeers.has(id)?'SIM/AOI':desiredTopologyPeers.has(id)?'TOPO':'direct'):peer.state; right.style.color=connected?'var(--accent)':'var(--warn)'; row.append(left,right); element.appendChild(row); }
 }
 
 const logElement=document.getElementById('log'); const logEmpty=document.getElementById('logEmpty');
