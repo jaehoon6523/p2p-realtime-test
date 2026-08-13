@@ -5,7 +5,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = Number(process.env.PORT) || 8090;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r1';
+const RULESET_REVISION = 'pssf-v13-r2';
 const MAX_ROOM_LENGTH = 96;
 const MAX_PEER_LENGTH = 96;
 const MAX_PAYLOAD = 128 * 1024;
@@ -238,27 +238,37 @@ function handleVerificationReceipt(room, session, message) {
     room.receiptBuckets.set(commandId, bucket);
   }
   if (bucket.finalized || bucket.actorId !== actorId || bucket.sequence !== r.sequence || bucket.assignmentId !== assignmentId) return;
+  const decision = ['accept', 'reject', 'abstain'].includes(r.decision) ? r.decision : null;
+  const resultCode = String(r.resultCode || '').slice(0, 80);
+  if (!decision || (decision === 'reject' && !resultCode)) return;
   bucket.receipts.set(session.peerId, {
-    validatorId: session.peerId, decision: r.decision === 'reject' ? 'reject' : r.decision === 'abstain' ? 'abstain' : 'accept',
-    reason: String(r.reason || '').slice(0, 240), computedHash, evidenceHash,
+    validatorId: session.peerId, decision,
+    reason: String(r.reason || '').slice(0, 240), resultCode, computedHash, evidenceHash,
   });
   const decisive = [...bucket.receipts.values()].filter(x => x.decision !== 'abstain');
-  const acceptGroups = new Map();
-  for (const vote of decisive.filter(x => x.decision === 'accept')) {
-    const key=`${vote.evidenceHash}:${vote.computedHash}`; const arr=acceptGroups.get(key)||[]; arr.push(vote); acceptGroups.set(key,arr);
+  const acceptGroups = new Map(), rejectGroups = new Map();
+  for (const vote of decisive) {
+    const key=vote.decision==='accept'
+      ? `${vote.evidenceHash}:${vote.computedHash}`
+      : `${vote.evidenceHash}:${vote.computedHash}:${vote.resultCode}`;
+    const groups=vote.decision==='accept'?acceptGroups:rejectGroups;
+    const arr=groups.get(key)||[]; arr.push(vote); groups.set(key,arr);
   }
   const bestAccept=[...acceptGroups.entries()].sort((a,b)=>b[1].length-a[1].length)[0]||null;
-  const rejected = decisive.filter(x => x.decision === 'reject').length;
+  const bestReject=[...rejectGroups.entries()].sort((a,b)=>b[1].length-a[1].length)[0]||null;
   const quorum = policy.quorum;
-  let verdict = null, acceptedEvidenceHash=null, acceptedComputedHash=null;
-  if (quorum > 0 && bestAccept && bestAccept[1].length >= quorum) { verdict='accepted'; [acceptedEvidenceHash,acceptedComputedHash]=bestAccept[0].split(':'); }
-  else if (quorum > 0 && rejected > policy.validatorIds.length - quorum) verdict = 'rejected';
+  let verdict = null, certifiedEvidenceHash=null, certifiedComputedHash=null, certifiedResultCode=null;
+  if (quorum > 0 && bestAccept && bestAccept[1].length >= quorum) {
+    verdict='accepted'; [certifiedEvidenceHash,certifiedComputedHash]=bestAccept[0].split(':');
+  } else if (quorum > 0 && bestReject && bestReject[1].length >= quorum) {
+    verdict='rejected'; [certifiedEvidenceHash,certifiedComputedHash,certifiedResultCode]=bestReject[0].split(':');
+  }
   if (!verdict) return;
   bucket.finalized = true;
   const certificate = {
     type: 'verification-certificate', signalProtocol: SIGNAL_PROTOCOL, channelId: room.channelId,
     commandId, playerId: actorId, sequence: bucket.sequence, assignmentId, verdict,
-    validatorIds: policy.validatorIds, quorum, evidenceHash:acceptedEvidenceHash, computedHash:acceptedComputedHash, receipts: [...bucket.receipts.values()], serverTime: Date.now(),
+    validatorIds: policy.validatorIds, quorum, evidenceHash:certifiedEvidenceHash, computedHash:certifiedComputedHash, resultCode:certifiedResultCode, receipts: [...bucket.receipts.values()], serverTime: Date.now(),
   };
   certificate.certificateHash = stableHash(certificate);
   const recipients = new Set([actorId, ...policy.directPeers]);
