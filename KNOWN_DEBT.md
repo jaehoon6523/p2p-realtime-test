@@ -2,7 +2,7 @@
 
 새 기능보다 아래 순서로 닫는 것이 우선입니다.
 
-1. **Evidence authenticity**: r4는 checkpoint item을 historical simulation sequence와 교차검증하지만, cache가 없는 상태에서는 checkpoint가 실제 관측 상태였음을 독립적으로 증명하지 못함.
+1. **Evidence / repair authenticity**: r5는 checkpoint를 historical simulation sequence와 교차검증하고 missing ref는 snapshot history tail / targeted history repair로 복구하지만, cache가 없던 verifier에게 owner가 제공한 repair state 자체는 아직 cryptographic proof가 아님.
 2. **Heal rule truth**: `1초 정지`는 현재 command 생성측 규칙이고 validator의 독립 evidence가 없음.
 3. **Deterministic respawn time**: `performance.now()` 기반 판정 제거 필요.
 4. **Cryptographic commitment**: 32-bit `stableHash()`는 보안 commitment가 아님.
@@ -34,3 +34,12 @@
 - SHOOT rejection은 movement profile을 rebase하지 않는다.
 - checkpoint local consistency check는 current position이 아니라 checkpoint의 historical sequence를 사용한다.
 - heal/respawn은 아직 actor state mutation 때문에 simulation stream에 남아 있다.
+
+
+## r5 history repair correction
+
+- snapshot은 현재 state 한 점뿐 아니라 최근 simulation history tail을 함께 전달한다.
+- `SIMULATION_REF_MISSING`은 무작정 current snapshot을 반복하지 않고 요청한 `sequence/stateHash`를 targeted history repair로 요청한다.
+- history repair 수신은 historical cache만 채우며 current confirmed sequence를 rewind하지 않는다.
+- respawn commit 직후 local peer는 direct peers에 snapshot을 즉시 broadcast하고 signaling presence를 즉시 갱신한다.
+- 목적은 reconnect/topology churn/respawn 이후 늦게 도착한 SHOOT이 과거 `simulationRef`를 잃어버리는 liveness failure를 막는 것이다.

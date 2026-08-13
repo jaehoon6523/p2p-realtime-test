@@ -33,7 +33,7 @@ p2p-realtime-test/
 
 - game protocol: **13**
 - signaling protocol: **5**
-- ruleset: **pssf-v13-r4**
+- ruleset: **pssf-v13-r5**
 - server-assigned actor policy: `assignmentId / topologyEpoch / validatorIds / quorum`
 - simulation stream (`move/heal/respawn`): actor state sequence + deterministic dependency chain
 - shoot event stream: independent `eventSeq` + `simulationRef(sequence,stateHash)` + aim vector
@@ -53,7 +53,7 @@ p2p-realtime-test/
 
 `REJECTED-NOOP`은 sequence를 삭제하지 않습니다. 따라서 하나의 reject 때문에 이후 모든 명령이 영구적인 sequence hole에 갇히지 않습니다.
 
-## r4 dual-stream ordering
+## r5 dual-stream ordering + history repair
 
 `shoot`은 더 이상 actor simulation sequence를 소비하지 않습니다.
 
@@ -67,7 +67,18 @@ seq 204 MOVE
 
 `eventSeq 40`의 quorum certificate가 늦어져도 `seq 202~204`의 movement finality는 진행됩니다. 반대로 SHOOT은 `simulationRef`로 발사 당시 actor pose/life를 고정합니다. validator는 현재 위치가 아니라 해당 historical simulation sequence를 조회해 origin을 재구성하고, `aimX/aimY`로 ray를 다시 계산합니다.
 
-현재 r4에서 별도 event stream으로 분리한 것은 **SHOOT**입니다. `heal/respawn`은 actor state 자체를 변경하므로 simulation stream에 남겨 두었습니다. combat-state overlay까지 추가로 분리하는 것은 별도 단계입니다.
+현재 r5에서 별도 event stream으로 분리한 것은 **SHOOT**입니다. `heal/respawn`은 actor state 자체를 변경하므로 simulation stream에 남겨 두었습니다. combat-state overlay까지 추가로 분리하는 것은 별도 단계입니다.
+
+### Snapshot / historical repair
+
+새 direct 연결이나 재접속이 현재 `seq=N` snapshot 한 점만 받으면, 늦게 도착한 SHOOT이 `refSim < N`을 가리킬 때 historical pose가 비어 있을 수 있습니다. r5는 이를 두 단계로 복구합니다.
+
+- snapshot에 최근 simulation history tail을 함께 전송
+- 특정 `simulationRef(sequence,stateHash)`가 여전히 없으면 해당 sequence만 `historyRepair`로 요청/응답
+- history repair는 current simulation state를 되감지 않고 event validation cache만 채움
+- local respawn commit 직후 direct peers에 snapshot + signaling presence를 즉시 재전파하여 새 `lifeId/alive`를 알림
+
+`historyRepair`는 현재 owner가 제공하는 liveness repair 자료이며 cryptographic proof는 아닙니다. 증거 진위성은 `KNOWN_DEBT.md`의 별도 보안 부채로 남깁니다.
 
 ## 실행
 

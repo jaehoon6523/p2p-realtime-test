@@ -186,21 +186,36 @@ function retryDeferredCommand(commandId){
     ingestCommand(item.command,item.remote,{reentry:true});
 }
 
-function requestPeerResync(playerId,reason){
+function requestPeerResync(playerId,reason,{requestedSequence=null,requestedStateHash=null}={}){
     if(!playerId||playerId===myId||!isPeerOpen(playerId)) return false;
     const now=performance.now();
-    if(now-(lastResyncRequestAt.get(playerId)||0)<500) return false;
-    lastResyncRequestAt.set(playerId,now);
+    const targeted=Number.isSafeInteger(requestedSequence)&&requestedSequence>=0;
+    const throttleKey=targeted?`${playerId}:s${requestedSequence}:${requestedStateHash||'-'}`:playerId;
+    if(now-(lastResyncRequestAt.get(throttleKey)||0)<500) return false;
+    lastResyncRequestAt.set(throttleKey,now);
     resyncCounter++;
     const local=confirmedWorld[playerId];
-    safeDataSend(playerId,{kind:'resyncRequest',request:{protocol:PROTOCOL,requesterId:myId,playerId,knownSequence:confirmedSeq.get(playerId)||0,knownEventSequence:confirmedEventSeq.get(playerId)||0,knownStateHash:local?stateHash(local):null,reason:String(reason||'state mismatch').slice(0,120)}});
-    log('t-sys',`RESYNC request player=${playerId} known=${confirmedSeq.get(playerId)||0}/e${confirmedEventSeq.get(playerId)||0} reason=${reason}`);
+    safeDataSend(playerId,{kind:'resyncRequest',request:{
+        protocol:PROTOCOL,requesterId:myId,playerId,
+        knownSequence:confirmedSeq.get(playerId)||0,
+        knownEventSequence:confirmedEventSeq.get(playerId)||0,
+        knownStateHash:local?stateHash(local):null,
+        requestedSequence:targeted?requestedSequence:null,
+        requestedStateHash:targeted&&typeof requestedStateHash==='string'?requestedStateHash:null,
+        reason:String(reason||'state mismatch').slice(0,120)
+    }});
+    log('t-sys',`RESYNC request player=${playerId} known=${confirmedSeq.get(playerId)||0}/e${confirmedEventSeq.get(playerId)||0}${targeted?` want=s${requestedSequence}`:''} reason=${reason}`);
     return true;
 }
 
 function receiveResyncRequest(remoteId,request){
     if(!request||request.protocol!==PROTOCOL||request.requesterId!==remoteId||request.playerId!==myId) return;
-    log('t-sys',`RESYNC requested by=${remoteId} peerKnown=${request.knownSequence??'-'}/e${request.knownEventSequence??'-'} reason=${request.reason||'-'}`);
+    const requestedSequence=Number.isSafeInteger(request.requestedSequence)&&request.requestedSequence>=0?request.requestedSequence:null;
+    log('t-sys',`RESYNC requested by=${remoteId} peerKnown=${request.knownSequence??'-'}/e${request.knownEventSequence??'-'}${requestedSequence!=null?` want=s${requestedSequence}`:''} reason=${request.reason||'-'}`);
+    if(requestedSequence!=null){
+        const repaired=sendHistoryRepair(remoteId,requestedSequence,request.requestedStateHash);
+        if(repaired) return;
+    }
     sendSnapshot(remoteId);
 }
 

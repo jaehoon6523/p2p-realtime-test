@@ -171,7 +171,7 @@ function ingestCommand(command,remote,{reentry=false}={}){
         }
         if(ref.status==='missing'||ref.status==='invalid'){
             deferCommand(command,remote,'SIMULATION_REF_MISSING',`historical simulation ref unavailable seq=${command.simulationRef?.sequence??'-'}`);
-            if(remote) requestPeerResync(command.playerId,'simulation-ref-missing');
+            if(remote) requestPeerResync(command.playerId,'simulation-ref-missing',{requestedSequence:command.simulationRef?.sequence,requestedStateHash:command.simulationRef?.stateHash});
             return;
         }
         previous=ref.state; // mismatch is intentionally audited/rejected, not treated as a transport fault.

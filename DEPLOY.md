@@ -13,7 +13,7 @@
 Expected startup log:
 
 ```text
-[p2p-arena-signaling] protocol=5 ruleset=pssf-v13-r4 base<=5 sim<=16 listening ws://0.0.0.0:<PORT>
+[p2p-arena-signaling] protocol=5 ruleset=pssf-v13-r5 base<=5 sim<=16 listening ws://0.0.0.0:<PORT>
 ```
 
 ## GitHub Pages
@@ -25,3 +25,8 @@ https://jaehoon6523.github.io/p2p-realtime-test/p2p-mmo-demo-hardened.html?signa
 ```
 
 정적 HTML은 저장소 루트에 두고, 분리된 런타임 코드는 루트의 `js/`를 상대 경로로 참조합니다.
+
+
+## r5 확인 포인트
+
+재접속/부활 후 정상 로그는 `simulation-ref-missing`이 지속 반복되지 않아야 합니다. 필요 시 한 번의 `HISTORY REPAIR sent/merged` 뒤 deferred event가 재평가되어야 합니다. local respawn 직후 direct peer에는 새 snapshot이 즉시 전송됩니다.

@@ -46,6 +46,7 @@ function handleWireMessage(remoteId,raw){
     let message; try{ if(typeof raw!=='string'||raw.length>128*1024) throw new Error('message too large'); message=JSON.parse(raw); noteTraffic('rx',message.kind,byteLength(raw)); }catch(error){ invalidCounter++; log('t-err',`invalid JSON from=${remoteId}: ${error.message}`); return; }
     if(message.kind==='command') receiveCommand(remoteId,message.command);
     else if(message.kind==='snapshot') receiveSnapshot(remoteId,message.snapshot);
+    else if(message.kind==='historyRepair') receiveHistoryRepair(remoteId,message.repair);
     else if(message.kind==='neighborDigest') receiveNeighborDigest(remoteId,message.digest);
     else if(message.kind==='botTelegraph') receiveBotTelegraph(remoteId,message.telegraph);
     else if(message.kind==='resyncRequest') receiveResyncRequest(remoteId,message.request);

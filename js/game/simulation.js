@@ -41,7 +41,13 @@ function registerKillOutcome(victimId,lifeId,killerId,assists,sourceHitId){
 function onRespawnCommitted(command,state){
     for(const key of [...damageContributors.keys()]) if(key.startsWith(`${command.playerId}:`)&&key!==contributorKey(command.playerId,state.lifeId)) damageContributors.delete(key);
     delete hitFlashes[command.playerId];
-    if(command.playerId===myId) log('t-cmd',`RESPAWN life=${state.lifeId}`);
+    if(command.playerId===myId){
+        log('t-cmd',`RESPAWN life=${state.lifeId}`);
+        // Respawn changes life identity and targetability. Do not wait for the 1s presence timer.
+        sendPresence();
+        for(const remoteId of directOpenPeerIds()) sendSnapshot(remoteId);
+        broadcastNeighborDigests();
+    }
 }
 
 function spawnBullet(command,shooterState=null){ const origin=shooterState||resolveSimulationReference(command.playerId,command.simulationRef)?.state; if(!origin) return; bullets.push({x1:origin.x,y1:origin.y,x2:origin.x+command.aimX*MAX_RANGE,y2:origin.y+command.aimY*MAX_RANGE,born:performance.now(),color:visibleWorld[command.playerId]?.color||'#fff'}); }
@@ -236,10 +242,73 @@ function tickCombat(){
 }
 function hasPendingType(playerId,type){ return [...(pendingOrderByPlayer.get(playerId)||[]),...(pendingEventOrderByPlayer.get(playerId)||[])].some(id=>pendingById.get(id)?.command.type===type); }
 
+function compactHistoryState(state){
+    return {
+        x:round6(state.x),y:round6(state.y),sequence:state.sequence,tick:state.tick,
+        hp:Number.isSafeInteger(state.hp)?state.hp:MAX_HP,alive:Boolean(state.alive),lifeId:state.lifeId,
+        deadServerAt:Number(state.deadServerAt)||0,
+        refHash:simulationRefHash(state)
+    };
+}
+function validHistoryStateShape(state){
+    return state&&[state.x,state.y].every(Number.isFinite)&&Number.isSafeInteger(state.sequence)&&state.sequence>=0&&
+        Number.isSafeInteger(state.tick)&&state.tick>=0&&Number.isSafeInteger(state.lifeId)&&state.lifeId>=1&&
+        Number.isSafeInteger(state.hp)&&state.hp>=0&&state.hp<=MAX_HP&&typeof state.alive==='boolean'&&
+        typeof state.refHash==='string'&&state.refHash.length<=32;
+}
+function snapshotHistoryTail(){
+    const history=simulationStateHistory.get(myId);
+    if(!history) return [];
+    const sequences=[...history.keys()].sort((a,b)=>b-a).slice(0,SNAPSHOT_HISTORY_TAIL_SEQUENCES).sort((a,b)=>a-b);
+    const entries=[];
+    for(const sequence of sequences){
+        for(const state of history.get(sequence)||[]){
+            entries.push(compactHistoryState(state));
+            if(entries.length>=SNAPSHOT_HISTORY_TAIL_SEQUENCES*4) return entries;
+        }
+    }
+    return entries;
+}
+function importHistoricalStates(remoteId,states){
+    let imported=0;
+    for(const raw of Array.isArray(states)?states:[]){
+        if(!validHistoryStateShape(raw)) continue;
+        const normalized={...raw,color:colorFor(remoteId),deadObservedAt:raw.alive?0:performance.now(),tentative:false};
+        if(simulationRefHash(normalized)!==raw.refHash) continue;
+        rememberSimulationState(remoteId,normalized);
+        imported++;
+    }
+    return imported;
+}
+function sendHistoryRepair(remoteId,requestedSequence,requestedStateHash=null){
+    if(!isPeerOpen(remoteId)||!Number.isSafeInteger(requestedSequence)||requestedSequence<0) return false;
+    let states=simulationStateCandidates(myId,requestedSequence);
+    if(typeof requestedStateHash==='string'&&requestedStateHash){
+        const exact=states.filter(state=>simulationRefHash(state)===requestedStateHash);
+        if(exact.length) states=exact;
+    }
+    states=states.slice(0,HISTORY_REPAIR_MAX_STATES);
+    if(!states.length) return false;
+    const payload={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,sequence:requestedSequence,states:states.map(compactHistoryState)};
+    safeDataSend(remoteId,{kind:'historyRepair',repair:payload});
+    log('t-sys',`HISTORY REPAIR sent to=${remoteId} seq=${requestedSequence} variants=${states.length}`);
+    return true;
+}
+function receiveHistoryRepair(remoteId,repair){
+    if(!repair||repair.protocol!==PROTOCOL||repair.rulesetRevision!==RULESET_REVISION||repair.senderId!==remoteId||!Array.isArray(repair.states)||repair.states.length>HISTORY_REPAIR_MAX_STATES) return;
+    const imported=importHistoricalStates(remoteId,repair.states);
+    if(!imported) return;
+    log('t-sys',`HISTORY REPAIR merged from=${remoteId} seq=${repair.sequence??'-'} states=${imported}`);
+    // Targeted historical repair is for consequential events. It must not rewind current simulation state.
+    acceptDeferred(remoteId,'event');
+}
 function sendSnapshot(remoteId){
     if(!isPeerOpen(remoteId)) return;
     const state=confirmedWorld[myId];
-    const snapshot={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,clockTick:currentTick(),eventSequence:confirmedEventSeq.get(myId)||0,state:{...state,deadObservedAt:0},stateHash:stateHash(state)};
+    const snapshot={
+        protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,clockTick:currentTick(),eventSequence:confirmedEventSeq.get(myId)||0,
+        state:{...state,deadObservedAt:0},stateHash:stateHash(state),historyTail:snapshotHistoryTail()
+    };
     safeDataSend(remoteId,{kind:'snapshot',snapshot});
 }
 function receiveSnapshot(remoteId,snapshot){
@@ -247,7 +316,12 @@ function receiveSnapshot(remoteId,snapshot){
     relayWorld.delete(remoteId);
     const state=snapshot.state;
     if(![state.x,state.y].every(Number.isFinite)||!Number.isSafeInteger(state.sequence)||!Number.isSafeInteger(state.lifeId)||!Number.isSafeInteger(state.hp)) return;
-    const localSeq=confirmedSeq.get(remoteId)||0; if(state.sequence<localSeq) return;
+    const historyImported=importHistoricalStates(remoteId,snapshot.historyTail);
+    const localSeq=confirmedSeq.get(remoteId)||0;
+    if(state.sequence<localSeq){
+        if(historyImported) acceptDeferred(remoteId,'event');
+        return;
+    }
     const snapshotEventSequence=Number.isSafeInteger(snapshot.eventSequence)?snapshot.eventSequence:(confirmedEventSeq.get(remoteId)||0);
     reconcileEventStreamFromSnapshot(remoteId,state.sequence,snapshotEventSequence);
     const normalized={...state,color:state.color||colorFor(remoteId),hp:Math.max(0,Math.min(MAX_HP,state.hp)),alive:Boolean(state.alive),deadObservedAt:state.alive?0:performance.now(),tentative:false};
@@ -256,7 +330,7 @@ function receiveSnapshot(remoteId,snapshot){
     const now=performance.now();
     tickAnchors.set(remoteId,{remoteTick:Number.isSafeInteger(snapshot.clockTick)?snapshot.clockTick:normalized.tick,localTime:now});
     activityAnchors.set(remoteId,{lastMoveAt:now,lastDamageAt:now,lastHealAt:now});
-    log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence}/e${confirmedEventSeq.get(remoteId)||0} alive=${normalized.alive}`);
+    log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence}/e${confirmedEventSeq.get(remoteId)||0} alive=${normalized.alive} history=${historyImported}`);
     acceptDeferred(remoteId,'simulation');
     acceptDeferred(remoteId,'event');
 }

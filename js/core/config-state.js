@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r4';
+const RULESET_REVISION = 'pssf-v13-r5';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
@@ -51,6 +51,8 @@ const MAX_DEFERRED_PER_PLAYER = 256;
 const MAX_LOCAL_PENDING = 32;
 const MAX_LOCAL_EVENT_PENDING = 4;
 const SIMULATION_HISTORY_LIMIT = 512;
+const SNAPSHOT_HISTORY_TAIL_SEQUENCES = 96;
+const HISTORY_REPAIR_MAX_STATES = 16;
 const FINALIZED_HISTORY_LIMIT = 512;
 const MAX_RANGE = 230; // combat ruleset은 AOI 설정과 독립
 const HIT_RADIUS = 14;
