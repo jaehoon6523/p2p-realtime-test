@@ -89,17 +89,17 @@ function evaluateCommand(command,pendingOverride=null){
     }
 
     if(command.type==='shoot'){
-        const length=Math.hypot(command.dirX,command.dirY);
-        const originMatches=Math.hypot(previous.x-command.originX,previous.y-command.originY)<1.5;
-        const checkpointOk=stableHash(command.checkpoint)===command.checkpointHash&&checkpointMatchesLocal(command.checkpoint,command.playerId,previous);
+        const length=Math.hypot(command.aimX,command.aimY);
+        const refMatches=command.simulationRef?.sequence===previous.sequence&&command.simulationRef?.stateHash===simulationRefHash(previous);
+        const checkpointOk=stableHash(command.checkpoint)===command.checkpointHash&&checkpointMatchesLocal(command.checkpoint,command.playerId,previous,command.simulationRef);
         const world=Object.create(null);
         for(const item of command.checkpoint) world[item.playerId]=item;
-        const hit=rayHit(command.originX,command.originY,command.dirX,command.dirY,world,command.playerId);
+        const hit=rayHit(previous.x,previous.y,command.aimX,command.aimY,world,command.playerId);
         const life=hit?world[hit]?.lifeId:null;
-        const accepted=previous.alive&&Math.abs(length-1)<0.02&&originMatches&&checkpointOk&&hit===command.claimedHitId&&life===command.claimedHitLifeId;
+        const accepted=previous.alive&&Math.abs(length-1)<0.02&&refMatches&&checkpointOk&&hit===command.claimedHitId&&life===command.claimedHitLifeId;
         return accepted
-            ? {disposition:RULE_DISPOSITION.ACCEPT,code:'SHOOT_VALID',reason:'shoot verified',computed:{hit,life},advanceTick:true}
-            : {disposition:RULE_DISPOSITION.REJECT,code:'SHOOT_INVALID',reason:`shoot invalid hit=${hit||'none'} checkpoint=${checkpointOk}`,computed:{hit,life},advanceTick:true};
+            ? {disposition:RULE_DISPOSITION.ACCEPT,code:'SHOOT_VALID',reason:'shoot verified against historical simulation reference',computed:{hit,life,simulationRef:command.simulationRef},advanceTick:false}
+            : {disposition:RULE_DISPOSITION.REJECT,code:'SHOOT_INVALID',reason:`shoot invalid hit=${hit||'none'} checkpoint=${checkpointOk} ref=${refMatches}`,computed:{hit,life,simulationRef:command.simulationRef},advanceTick:false};
     }
 
     if(command.type==='heal'){
@@ -124,20 +124,27 @@ function evaluateCommand(command,pendingOverride=null){
     return {disposition:RULE_DISPOSITION.FAULT,code:'UNSUPPORTED_COMMAND',reason:'unsupported command',computed:null,advanceTick:false};
 }
 
-function checkpointMatchesLocal(checkpoint,shooterId,shooterState){
+function checkpointMatchesLocal(checkpoint,shooterId,shooterState,simulationRef=null){
     if(!Array.isArray(checkpoint)||checkpoint.length>64) return false;
     const seen=new Set(); let shooterSeen=false;
     for(const item of checkpoint){
-        if(!item||typeof item.playerId!=='string'||seen.has(item.playerId)||![item.x,item.y].every(Number.isFinite)||!Number.isSafeInteger(item.lifeId)||!inBounds(item.x,item.y)) return false;
+        if(!item||typeof item.playerId!=='string'||seen.has(item.playerId)||![item.x,item.y].every(Number.isFinite)||!Number.isSafeInteger(item.lifeId)||!Number.isSafeInteger(item.sequence)||!Number.isSafeInteger(item.tick)||!inBounds(item.x,item.y)) return false;
         seen.add(item.playerId);
         if(item.playerId===shooterId){
             shooterSeen=true;
-            if(Math.hypot(shooterState.x-item.x,shooterState.y-item.y)>1.5||item.lifeId!==shooterState.lifeId) return false;
+            if(item.sequence!==simulationRef?.sequence||Math.hypot(shooterState.x-item.x,shooterState.y-item.y)>1.5||item.lifeId!==shooterState.lifeId||Boolean(item.alive)!==Boolean(shooterState.alive)) return false;
+            continue;
         }
-        const local=item.playerId===shooterId?shooterState:confirmedWorld[item.playerId];
-        // Evidence is self-contained, but direct local knowledge is used as an additional consistency check.
-        if(local&&Math.hypot(local.x-item.x,local.y-item.y)>3.5) return false;
-        if(local&&local.lifeId!==item.lifeId) return false;
+
+        // VALORANT/Source-style historical check: compare the evidence to the peer's state at
+        // the checkpoint's simulation sequence, never to its *current* position.
+        const historical=simulationStateCandidates(item.playerId,item.sequence);
+        if(historical.length){
+            const matches=historical.some(local=>Math.hypot(local.x-item.x,local.y-item.y)<=3.5&&local.lifeId===item.lifeId&&Boolean(local.alive)===Boolean(item.alive));
+            if(!matches) return false;
+        }
+        // If this validator no longer has that historical state, the self-contained checkpoint
+        // remains usable evidence; absence of a cache entry is not a negative vote.
     }
     return shooterSeen;
 }

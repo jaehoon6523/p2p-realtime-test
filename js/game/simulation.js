@@ -26,6 +26,7 @@ function registerConfirmedHit(command,certificateServerTime=null){
         registerKillOutcome(command.claimedHitId,victim.lifeId,command.playerId,assists,command.commandId);
         log('t-warn',`DEAD victim=${command.claimedHitId} killer=${command.playerId}`);
     }
+    rememberSimulationState(command.claimedHitId,victim);
     rebuildVisible(command.claimedHitId);
 }
 function registerKillOutcome(victimId,lifeId,killerId,assists,sourceHitId){
@@ -43,7 +44,7 @@ function onRespawnCommitted(command,state){
     if(command.playerId===myId) log('t-cmd',`RESPAWN life=${state.lifeId}`);
 }
 
-function spawnBullet(command){ bullets.push({x1:command.originX,y1:command.originY,x2:command.originX+command.dirX*MAX_RANGE,y2:command.originY+command.dirY*MAX_RANGE,born:performance.now(),color:visibleWorld[command.playerId]?.color||'#fff'}); }
+function spawnBullet(command,shooterState=null){ const origin=shooterState||resolveSimulationReference(command.playerId,command.simulationRef)?.state; if(!origin) return; bullets.push({x1:origin.x,y1:origin.y,x2:origin.x+command.aimX*MAX_RANGE,y2:origin.y+command.aimY*MAX_RANGE,born:performance.now(),color:visibleWorld[command.playerId]?.color||'#fff'}); }
 function buildMoveProfile(distance,startSpeed){
     const d=Math.max(0,distance);
     const v0=Math.max(0,startSpeed);
@@ -233,11 +234,12 @@ function tickCombat(){
     if(!me.alive){ delete moveState[myId]; const confirmed=confirmedWorld[myId]; if(confirmed&&!hasPendingType(myId,'respawn')&&performance.now()-(confirmed.deadObservedAt||0)>=RESPAWN_MS) executeLocal(makeRespawnCommand()); return; }
     if(me.hp<MAX_HP&&!hasPendingType(myId,'heal')){ const activity=activityAnchors.get(myId); const idleMs=activity?performance.now()-Math.max(activity.lastMoveAt,activity.lastDamageAt,activity.lastHealAt):0; if(idleMs>=1000) executeLocal(makeHealCommand()); }
 }
-function hasPendingType(playerId,type){ return (pendingOrderByPlayer.get(playerId)||[]).some(id=>pendingById.get(id)?.command.type===type); }
+function hasPendingType(playerId,type){ return [...(pendingOrderByPlayer.get(playerId)||[]),...(pendingEventOrderByPlayer.get(playerId)||[])].some(id=>pendingById.get(id)?.command.type===type); }
 
 function sendSnapshot(remoteId){
     if(!isPeerOpen(remoteId)) return;
-    const state=confirmedWorld[myId]; const snapshot={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,clockTick:currentTick(),state:{...state,deadObservedAt:0},stateHash:stateHash(state)};
+    const state=confirmedWorld[myId];
+    const snapshot={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,clockTick:currentTick(),eventSequence:confirmedEventSeq.get(myId)||0,state:{...state,deadObservedAt:0},stateHash:stateHash(state)};
     safeDataSend(remoteId,{kind:'snapshot',snapshot});
 }
 function receiveSnapshot(remoteId,snapshot){
@@ -246,13 +248,15 @@ function receiveSnapshot(remoteId,snapshot){
     const state=snapshot.state;
     if(![state.x,state.y].every(Number.isFinite)||!Number.isSafeInteger(state.sequence)||!Number.isSafeInteger(state.lifeId)||!Number.isSafeInteger(state.hp)) return;
     const localSeq=confirmedSeq.get(remoteId)||0; if(state.sequence<localSeq) return;
-    reconcileEventStreamFromSnapshot(remoteId,state.sequence);
+    const snapshotEventSequence=Number.isSafeInteger(snapshot.eventSequence)?snapshot.eventSequence:(confirmedEventSeq.get(remoteId)||0);
+    reconcileEventStreamFromSnapshot(remoteId,state.sequence,snapshotEventSequence);
     const normalized={...state,color:state.color||colorFor(remoteId),hp:Math.max(0,Math.min(MAX_HP,state.hp)),alive:Boolean(state.alive),deadObservedAt:state.alive?0:performance.now(),tentative:false};
-    confirmedWorld[remoteId]=normalized; visibleWorld[remoteId]={...normalized}; confirmedSeq.set(remoteId,normalized.sequence);
+    confirmedWorld[remoteId]=normalized; visibleWorld[remoteId]={...normalized}; confirmedSeq.set(remoteId,normalized.sequence); confirmedEventSeq.set(remoteId,Math.max(confirmedEventSeq.get(remoteId)||0,snapshotEventSequence)); rememberSimulationState(remoteId,normalized);
     queueRemoteRenderTarget(remoteId,normalized,{snap:true});
     const now=performance.now();
     tickAnchors.set(remoteId,{remoteTick:Number.isSafeInteger(snapshot.clockTick)?snapshot.clockTick:normalized.tick,localTime:now});
     activityAnchors.set(remoteId,{lastMoveAt:now,lastDamageAt:now,lastHealAt:now});
-    log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence} alive=${normalized.alive}`);
-    acceptDeferred(remoteId);
+    log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence}/e${confirmedEventSeq.get(remoteId)||0} alive=${normalized.alive}`);
+    acceptDeferred(remoteId,'simulation');
+    acceptDeferred(remoteId,'event');
 }

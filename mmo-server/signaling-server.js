@@ -5,7 +5,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = Number(process.env.PORT) || 8090;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r3';
+const RULESET_REVISION = 'pssf-v13-r4';
 const MAX_ROOM_LENGTH = 96;
 const MAX_PEER_LENGTH = 96;
 const MAX_PAYLOAD = 128 * 1024;
@@ -230,14 +230,16 @@ function handleVerificationReceipt(room, session, message) {
   const assignmentId = typeof r.assignmentId === 'string' ? r.assignmentId.slice(0, 64) : '';
   const evidenceHash = typeof r.evidenceHash === 'string' ? r.evidenceHash.slice(0, 64) : '';
   const computedHash = typeof r.computedHash === 'string' ? r.computedHash.slice(0, 64) : '';
-  if (!actorId || !commandId || !assignmentId || !evidenceHash || !computedHash || !Number.isSafeInteger(r.sequence)) return;
+  const stream = r.stream === 'event' ? 'event' : r.stream === 'simulation' ? 'simulation' : null;
+  const streamSeq = Number.isSafeInteger(r.streamSeq) ? r.streamSeq : null;
+  if (!actorId || !commandId || !assignmentId || !evidenceHash || !computedHash || !stream || streamSeq == null || streamSeq < 1) return;
   const policy = policyByAssignment(room, actorId, assignmentId); if (!policy || !policy.validatorIds.includes(session.peerId)) return;
   let bucket = room.receiptBuckets.get(commandId);
   if (!bucket) {
-    bucket = { commandId, actorId, sequence: r.sequence, assignmentId, policy, receipts: new Map(), expiresAt: Date.now() + RECEIPT_TTL_MS, finalized: false };
+    bucket = { commandId, actorId, stream, streamSeq, assignmentId, policy, receipts: new Map(), expiresAt: Date.now() + RECEIPT_TTL_MS, finalized: false };
     room.receiptBuckets.set(commandId, bucket);
   }
-  if (bucket.finalized || bucket.actorId !== actorId || bucket.sequence !== r.sequence || bucket.assignmentId !== assignmentId) return;
+  if (bucket.finalized || bucket.actorId !== actorId || bucket.stream !== stream || bucket.streamSeq !== streamSeq || bucket.assignmentId !== assignmentId) return;
   const decision = ['accept', 'reject', 'abstain'].includes(r.decision) ? r.decision : null;
   const resultCode = String(r.resultCode || '').slice(0, 80);
   if (!decision || (decision === 'reject' && !resultCode)) return;
@@ -267,7 +269,7 @@ function handleVerificationReceipt(room, session, message) {
   bucket.finalized = true;
   const certificate = {
     type: 'verification-certificate', signalProtocol: SIGNAL_PROTOCOL, channelId: room.channelId,
-    commandId, playerId: actorId, sequence: bucket.sequence, assignmentId, verdict,
+    commandId, playerId: actorId, stream: bucket.stream, streamSeq: bucket.streamSeq, assignmentId, verdict,
     validatorIds: policy.validatorIds, quorum, evidenceHash:certifiedEvidenceHash, computedHash:certifiedComputedHash, resultCode:certifiedResultCode, receipts: [...bucket.receipts.values()], serverTime: Date.now(),
   };
   certificate.certificateHash = stableHash(certificate);

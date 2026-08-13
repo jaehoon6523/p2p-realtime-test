@@ -47,12 +47,19 @@ const deploy = fs.readFileSync(must('DEPLOY.md'),'utf8');
 if(!deploy.includes('Root Directory: `mmo-server`')) throw new Error('Render root directory changed');
 
 
+
+const factory = fs.readFileSync(must('js/core/command-factory.js'),'utf8');
+if(!factory.includes('eventSeq')) throw new Error('shoot event sequence missing');
+if(!factory.includes('simulationRef:{sequence:shooter.sequence,stateHash:simulationRefHash(shooter)}')) throw new Error('shoot simulation reference missing');
+const eventStream = fs.readFileSync(must('js/core/event-stream.js'),'utf8');
+if(!eventStream.includes('function drainEventCommits')) throw new Error('independent event finality stream missing');
+
 const bootstrap = fs.readFileSync(must('js/core/bootstrap.js'),'utf8');
 if(!bootstrap.includes('requestAnimationFrame(draw);')) throw new Error('render loop bootstrap missing');
 
 const config = fs.readFileSync(must('js/core/config-state.js'),'utf8');
 const server = fs.readFileSync(must('mmo-server/signaling-server.js'),'utf8');
-for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r3';"]){
+for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r4';"]){
   if(!config.includes(expected)) throw new Error(`client missing ${expected}`);
   if(!server.includes(expected)) throw new Error(`server missing ${expected}`);
 }

@@ -16,6 +16,8 @@ function initializePlayer(playerId,x,y,color=colorFor(playerId),options={}){
     confirmedWorld[playerId]={...state};
     visibleWorld[playerId]={...state};
     confirmedSeq.set(playerId,state.sequence);
+    confirmedEventSeq.set(playerId,Number.isSafeInteger(options.eventSequence)?options.eventSequence:0);
+    rememberSimulationState(playerId,state);
     const now=performance.now();
     tickAnchors.set(playerId,{remoteTick:tick,localTime:now});
     activityAnchors.set(playerId,{lastMoveAt:now,lastDamageAt:now,lastHealAt:now});

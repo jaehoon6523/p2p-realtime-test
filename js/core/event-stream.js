@@ -3,15 +3,24 @@
 function validateEnvelope(remoteId,command){
     if(!command||command.protocol!==PROTOCOL||command.rulesetRevision!==RULESET_REVISION) return {ok:false,code:'PROTOCOL_RULESET',reason:'unsupported protocol/ruleset',fault:true};
     if(!['move','shoot','heal','respawn'].includes(command.type)) return {ok:false,code:'COMMAND_TYPE',reason:'unsupported command',fault:true};
+    const expectedStream=command.type==='shoot'?'event':'simulation';
+    if(command.stream!==expectedStream) return {ok:false,code:'STREAM_TYPE',reason:`command type ${command.type} must use ${expectedStream} stream`,fault:true};
     if(command.playerId!==remoteId) return {ok:false,code:'IDENTITY_MISMATCH',reason:`identity mismatch channel=${remoteId} payload=${command.playerId}`,fault:true};
     if(typeof command.commandId!=='string'||command.commandId.length>160) return {ok:false,code:'COMMAND_ID',reason:'invalid commandId',fault:true};
-    if(!Number.isSafeInteger(command.sequence)||command.sequence<1) return {ok:false,code:'SEQUENCE',reason:'invalid sequence',fault:true};
     if(!Number.isSafeInteger(command.tick)||command.tick<0) return {ok:false,code:'TICK',reason:'invalid tick',fault:true};
-    if(typeof command.previousStateHash!=='string') return {ok:false,code:'PREVIOUS_HASH',reason:'invalid previousStateHash',fault:true};
     if(typeof command.assignmentId!=='string'||command.assignmentId.length>64||!Number.isSafeInteger(command.topologyEpoch)) return {ok:false,code:'ASSIGNMENT_SHAPE',reason:'invalid assignment',fault:true};
     if(!Number.isFinite(command.aoiRadius)||command.aoiRadius<120||command.aoiRadius>1400) return {ok:false,code:'AOI',reason:'invalid AOI radius',fault:true};
+
+    if(expectedStream==='simulation'){
+        if(!Number.isSafeInteger(command.sequence)||command.sequence<1) return {ok:false,code:'SEQUENCE',reason:'invalid simulation sequence',fault:true};
+        if(typeof command.previousStateHash!=='string') return {ok:false,code:'PREVIOUS_HASH',reason:'invalid previousStateHash',fault:true};
+    }else{
+        if(!Number.isSafeInteger(command.eventSeq)||command.eventSeq<1) return {ok:false,code:'EVENT_SEQUENCE',reason:'invalid event sequence',fault:true};
+        if(!command.simulationRef||!Number.isSafeInteger(command.simulationRef.sequence)||command.simulationRef.sequence<0||typeof command.simulationRef.stateHash!=='string') return {ok:false,code:'SIMULATION_REF',reason:'invalid simulation reference',fault:true};
+    }
+
     if(command.type==='move'&&![command.dx,command.dy,command.claimedX,command.claimedY].every(Number.isFinite)) return {ok:false,code:'MOVE_SHAPE',reason:'invalid move values',fault:true};
-    if(command.type==='shoot'&&(![command.originX,command.originY,command.dirX,command.dirY].every(Number.isFinite)||!Array.isArray(command.checkpoint)||command.checkpoint.length>64)) return {ok:false,code:'SHOOT_SHAPE',reason:'invalid shoot values',fault:true};
+    if(command.type==='shoot'&&(![command.aimX,command.aimY].every(Number.isFinite)||!Array.isArray(command.checkpoint)||command.checkpoint.length>64)) return {ok:false,code:'SHOOT_SHAPE',reason:'invalid shoot values',fault:true};
     if(command.type==='heal'&&!Number.isSafeInteger(command.claimedHp)) return {ok:false,code:'HEAL_SHAPE',reason:'invalid heal value',fault:true};
     if(command.type==='respawn'&&(!Number.isFinite(command.spawnX)||!Number.isFinite(command.spawnY)||!Number.isSafeInteger(command.nextLifeId))) return {ok:false,code:'RESPAWN_SHAPE',reason:'invalid respawn values',fault:true};
     return {ok:true};
@@ -51,10 +60,13 @@ function makeNoopState(previous,command,{advanceTick=false}={}){
     };
 }
 
-function addPending(command,remote,{verdict=null,rejectCode=null,rejectReason=null,advanceTick=false,noOp=false}={}){
-    const previous=getPredictedTail(command.playerId);
+function addPending(command,remote,{verdict=null,rejectCode=null,rejectReason=null,advanceTick=false,noOp=false,previousState=null}={}){
+    const stream=commandStream(command);
+    const previous=previousState||(stream==='event'?null:getPredictedTail(command.playerId));
     if(!previous) return null;
-    const nextState=noOp?makeNoopState(previous,command,{advanceTick}):predictNextState(previous,command);
+    const nextState=stream==='event'
+        ? {...previous,tentative:false}
+        : noOp?makeNoopState(previous,command,{advanceTick}):predictNextState(previous,command);
     const pending={
         command,
         previousState:{...previous},
@@ -69,11 +81,12 @@ function addPending(command,remote,{verdict=null,rejectCode=null,rejectReason=nu
         receivedAt:performance.now(),
     };
     pendingById.set(command.commandId,pending);
-    const order=pendingOrderByPlayer.get(command.playerId)||[];
+    const orders=stream==='event'?pendingEventOrderByPlayer:pendingOrderByPlayer;
+    const order=orders.get(command.playerId)||[];
     order.push(command.commandId);
-    order.sort((a,b)=>(pendingById.get(a)?.command.sequence||0)-(pendingById.get(b)?.command.sequence||0));
-    pendingOrderByPlayer.set(command.playerId,order);
-    rebuildVisible(command.playerId);
+    order.sort((a,b)=>(commandStreamSequence(pendingById.get(a)?.command)||0)-(commandStreamSequence(pendingById.get(b)?.command)||0));
+    orders.set(command.playerId,order);
+    if(stream==='simulation') rebuildVisible(command.playerId);
     return pending;
 }
 
@@ -81,7 +94,8 @@ function removePending(command){
     const pending=pendingById.get(command.commandId);
     if(pending) clearTimeout(pending.timeoutId);
     pendingById.delete(command.commandId);
-    pendingOrderByPlayer.set(command.playerId,(pendingOrderByPlayer.get(command.playerId)||[]).filter(id=>id!==command.commandId));
+    const orders=commandStream(command)==='event'?pendingEventOrderByPlayer:pendingOrderByPlayer;
+    orders.set(command.playerId,(orders.get(command.playerId)||[]).filter(id=>id!==command.commandId));
 }
 
 function executeLocal(command){
@@ -90,7 +104,6 @@ function executeLocal(command){
     const policy=policyForCommand(command);
     for(const id of policy?.directPeers||[]) if(isPeerOpen(id)) safeDataSend(id,{kind:'command',command});
 }
-
 
 function receiveCommand(remoteId,command){
     const validation=validateEnvelope(remoteId,command);
@@ -127,7 +140,7 @@ function handleRuleResult(command,pending,result){
         removePending(command);
         deferCommand(command,pending.remote,result.code,result.reason);
         if(pending.remote) requestPeerResync(command.playerId,result.code);
-        else log('t-warn',`local RESYNC requested code=${result.code} seq=${command.sequence}`);
+        else log('t-warn',`local RESYNC requested code=${result.code} ${commandSequenceText(command)}`);
         return;
     }
     if(result.disposition===RULE_DISPOSITION.FAULT){
@@ -145,43 +158,46 @@ function ingestCommand(command,remote,{reentry=false}={}){
     }
 
     const sequenceDisposition=classifySequenceArrival(command);
-    if(sequenceDisposition.kind===ARRIVAL_DISPOSITION.IGNORE){
-        noteIgnored(command,sequenceDisposition.code,sequenceDisposition.reason);
-        return;
-    }
-    if(sequenceDisposition.kind===ARRIVAL_DISPOSITION.FAULT){
-        reportProtocolFault(command,sequenceDisposition.code,sequenceDisposition.reason,{remote});
-        return;
-    }
-    if(sequenceDisposition.kind===ARRIVAL_DISPOSITION.DEFER){
-        deferCommand(command,remote,sequenceDisposition.code,sequenceDisposition.reason);
-        return;
-    }
+    if(sequenceDisposition.kind===ARRIVAL_DISPOSITION.IGNORE){ noteIgnored(command,sequenceDisposition.code,sequenceDisposition.reason); return; }
+    if(sequenceDisposition.kind===ARRIVAL_DISPOSITION.FAULT){ reportProtocolFault(command,sequenceDisposition.code,sequenceDisposition.reason,{remote}); return; }
+    if(sequenceDisposition.kind===ARRIVAL_DISPOSITION.DEFER){ deferCommand(command,remote,sequenceDisposition.code,sequenceDisposition.reason); return; }
 
-    const previous=getPredictedTail(command.playerId);
-    if(!previous){
-        deferCommand(command,remote,'NO_BASE_STATE','missing base state');
-        if(remote) requestPeerResync(command.playerId,'missing-base-state');
-        return;
-    }
-
-    if(stateHash(previous)!==command.previousStateHash){
-        if(previousDispositionSupportsDependencyReject(command)){
-            const pending=addPending(command,remote,{verdict:'rejected',rejectCode:'DEPENDENCY_INVALIDATED',rejectReason:`depends on rejected/invalidated seq=${command.sequence-1}`,advanceTick:false,noOp:true});
-            if(pending){
-                log('t-sys',`REJECT-NOOP dependency player=${command.playerId} seq=${command.sequence}`);
-                drainCommits(command.playerId);
-            }
+    let previous=null;
+    if(commandStream(command)==='event'){
+        const ref=resolveSimulationReference(command.playerId,command.simulationRef);
+        if(ref.status==='pending'){
+            deferCommand(command,remote,'SIMULATION_REF_PENDING',`waiting for simulation seq=${command.simulationRef.sequence}`,{retryMs:TEMPORAL_RETRY_MIN_MS*2});
             return;
         }
-        deferCommand(command,remote,'STATE_HASH_MISMATCH',`previous state hash mismatch seq=${command.sequence}`);
-        if(remote) requestPeerResync(command.playerId,'state-hash-mismatch');
-        return;
+        if(ref.status==='missing'||ref.status==='invalid'){
+            deferCommand(command,remote,'SIMULATION_REF_MISSING',`historical simulation ref unavailable seq=${command.simulationRef?.sequence??'-'}`);
+            if(remote) requestPeerResync(command.playerId,'simulation-ref-missing');
+            return;
+        }
+        previous=ref.state; // mismatch is intentionally audited/rejected, not treated as a transport fault.
+    }else{
+        previous=getPredictedTail(command.playerId);
+        if(!previous){
+            deferCommand(command,remote,'NO_BASE_STATE','missing base state');
+            if(remote) requestPeerResync(command.playerId,'missing-base-state');
+            return;
+        }
+
+        if(stateHash(previous)!==command.previousStateHash){
+            if(previousDispositionSupportsDependencyReject(command)){
+                const pending=addPending(command,remote,{verdict:'rejected',rejectCode:'DEPENDENCY_INVALIDATED',rejectReason:`depends on rejected/invalidated seq=${command.sequence-1}`,advanceTick:false,noOp:true});
+                if(pending){ log('t-sys',`REJECT-NOOP dependency player=${command.playerId} seq=${command.sequence}`); drainCommits(command.playerId); }
+                return;
+            }
+            deferCommand(command,remote,'STATE_HASH_MISMATCH',`previous state hash mismatch seq=${command.sequence}`);
+            if(remote) requestPeerResync(command.playerId,'state-hash-mismatch');
+            return;
+        }
     }
 
-    const pending=addPending(command,remote);
+    const pending=addPending(command,remote,{previousState:previous});
     if(!pending) return;
-    if(command.type==='shoot') spawnBullet(command);
+    if(command.type==='shoot') spawnBullet(command,previous);
 
     const orphan=orphanCertificates.get(command.commandId);
     if(orphan){ orphanCertificates.delete(command.commandId); applyVerificationCertificate(orphan); }
@@ -206,7 +222,7 @@ function ingestCommand(command,remote,{reentry=false}={}){
             const live=pendingById.get(command.commandId);
             if(live?.verdict){
                 log('t-sys',`${command.type} solo fallback ${live.verdict} id=${command.commandId}`);
-                drainCommits(command.playerId);
+                if(commandStream(command)==='event') drainEventCommits(command.playerId); else drainCommits(command.playerId);
             }
         }else{
             pending.stalled=true;
@@ -216,21 +232,20 @@ function ingestCommand(command,remote,{reentry=false}={}){
         return;
     }
 
-    log('t-cmd',`${command.type} tentative id=${command.commandId} seq=${command.sequence} validators=${validators.join(',')} quorum=${quorum}`);
+    log('t-cmd',`${command.type} tentative id=${command.commandId} ${commandSequenceText(command)}${command.type==='shoot'?` refSim=${command.simulationRef.sequence}`:''} validators=${validators.join(',')} quorum=${quorum}`);
     if(validators.includes(myId)) runAudit(command);
     pending.timeoutId=setTimeout(()=>{
         const live=pendingById.get(command.commandId);
         if(live&&!live.verdict&&!live.stalled){
             live.stalled=true;
             stalledCounter++;
-            log('t-warn',`STALLED id=${command.commandId} committee=${validators.join(',')} certificate pending`);
+            log('t-warn',`STALLED id=${command.commandId} ${commandSequenceText(command)} committee=${validators.join(',')} certificate pending`);
         }
     },AUDIT_STALL_MS);
 }
 
 function drainCommits(playerId){
-    let hadRejected=false;
-    let lastRejectCode=null;
+    let hadRejected=false,lastRejectCode=null;
     while(true){
         const expected=(confirmedSeq.get(playerId)||0)+1;
         const pending=pendingAtSequence(playerId,expected);
@@ -240,7 +255,9 @@ function drainCommits(playerId){
     }
     rebuildVisible(playerId);
     if(hadRejected&&playerId===myId) rebaseLocalMovementAfterRejection(confirmedSeq.get(myId)||0,lastRejectCode||'REJECTED');
-    acceptDeferred(playerId);
+    acceptDeferred(playerId,'simulation');
+    // A newly committed simulation pose may unlock a shoot that arrived earlier.
+    acceptDeferred(playerId,'event');
 }
 
 function commitCommand(command,pending){
@@ -248,8 +265,7 @@ function commitCommand(command,pending){
     const beforeHash=stateHash(current);
     let state={...pending.nextState,tentative:false};
 
-    // Movement/shooting do not resurrect stale HP/life state while their event was pending.
-    if(command.type==='move'||command.type==='shoot'){
+    if(command.type==='move'){
         state={...state,hp:current.hp,alive:current.alive,lifeId:current.lifeId,deadObservedAt:current.deadObservedAt,deadServerAt:Number(current.deadServerAt)||0};
     }else if(command.type==='heal'){
         state={...state,hp:current.alive?Math.min(MAX_HP,current.hp+1):current.hp,alive:current.alive,lifeId:current.lifeId,deadObservedAt:current.deadObservedAt,deadServerAt:Number(current.deadServerAt)||0};
@@ -257,6 +273,7 @@ function commitCommand(command,pending){
 
     confirmedWorld[command.playerId]=state;
     confirmedSeq.set(command.playerId,command.sequence);
+    rememberSimulationState(command.playerId,state);
     const commitNow=performance.now();
     const activity=activityAnchors.get(command.playerId)||{lastMoveAt:commitNow,lastDamageAt:commitNow,lastHealAt:commitNow};
     if(command.type==='move') activity.lastMoveAt=commitNow;
@@ -269,7 +286,6 @@ function commitCommand(command,pending){
     const latency=Math.max(0,performance.now()-pending.receivedAt);
     commitLatencySamples.push(latency);
     if(commitLatencySamples.length>COMMIT_LATENCY_SAMPLES) commitLatencySamples.shift();
-    if(command.type==='shoot'&&command.claimedHitId) registerConfirmedHit(command,pending.certificateServerTime);
     if(command.type==='respawn') onRespawnCommitted(command,state);
     recordFinalizedEvent(command,FINAL_DISPOSITION.ACCEPTED,'accepted',{beforeHash,afterHash:stateHash(state),code:'ACCEPTED'});
     log('t-audit',`CONFIRMED seq=${command.sequence} type=${command.type} id=${command.commandId}`);
@@ -278,20 +294,51 @@ function commitCommand(command,pending){
 function finalizeRejectedCommand(command,pending){
     const current=confirmedWorld[command.playerId]||pending.previousState;
     const beforeHash=stateHash(current);
-    const state={
-        ...current,
-        sequence:command.sequence,
-        tick:pending.advanceTick?Math.max(current.tick,command.tick):current.tick,
-        tentative:false,
-    };
+    const state={...current,sequence:command.sequence,tick:pending.advanceTick?Math.max(current.tick,command.tick):current.tick,tentative:false};
     confirmedWorld[command.playerId]=state;
     confirmedSeq.set(command.playerId,command.sequence);
+    rememberSimulationState(command.playerId,state);
     removePending(command);
     rejectedCounter++;
     recordFinalizedEvent(command,pending.rejectCode==='DEPENDENCY_INVALIDATED'?FINAL_DISPOSITION.INVALIDATED:FINAL_DISPOSITION.REJECTED,pending.rejectReason||'rejected',{beforeHash,afterHash:stateHash(state),code:pending.rejectCode});
     log('t-warn',`REJECTED-NOOP seq=${command.sequence} id=${command.commandId} code=${pending.rejectCode||'REJECTED'} reason=${pending.rejectReason||'-'}`);
-
     reconcilePendingDependencies(command.playerId);
+}
+
+function drainEventCommits(playerId){
+    while(true){
+        const expected=(confirmedEventSeq.get(playerId)||0)+1;
+        const pending=pendingAtEventSequence(playerId,expected);
+        if(!pending||!pending.verdict) break;
+        if(pending.verdict==='accepted') finalizeAcceptedEvent(pending.command,pending);
+        else finalizeRejectedEvent(pending.command,pending);
+    }
+    // Event rejection/latency must never rebase or block the movement stream.
+    acceptDeferred(playerId,'event');
+}
+
+function finalizeAcceptedEvent(command,pending){
+    const current=confirmedWorld[command.playerId]||pending.previousState;
+    const beforeHash=current?stateHash(current):null;
+    confirmedEventSeq.set(command.playerId,command.eventSeq);
+    removePending(command);
+    confirmedCounter++;
+    const latency=Math.max(0,performance.now()-pending.receivedAt);
+    commitLatencySamples.push(latency);
+    if(commitLatencySamples.length>COMMIT_LATENCY_SAMPLES) commitLatencySamples.shift();
+    if(command.type==='shoot'&&command.claimedHitId) registerConfirmedHit(command,pending.certificateServerTime);
+    recordFinalizedEvent(command,FINAL_DISPOSITION.ACCEPTED,'accepted',{beforeHash,afterHash:beforeHash,code:'ACCEPTED'});
+    log('t-audit',`CONFIRMED eventSeq=${command.eventSeq} type=${command.type} refSim=${command.simulationRef?.sequence??'-'} id=${command.commandId}`);
+}
+
+function finalizeRejectedEvent(command,pending){
+    const current=confirmedWorld[command.playerId]||pending.previousState;
+    const beforeHash=current?stateHash(current):null;
+    confirmedEventSeq.set(command.playerId,command.eventSeq);
+    removePending(command);
+    rejectedCounter++;
+    recordFinalizedEvent(command,FINAL_DISPOSITION.REJECTED,pending.rejectReason||'rejected',{beforeHash,afterHash:beforeHash,code:pending.rejectCode});
+    log('t-warn',`REJECTED-EVENT-NOOP eventSeq=${command.eventSeq} id=${command.commandId} code=${pending.rejectCode||'REJECTED'} reason=${pending.rejectReason||'-'}`);
 }
 
 function reconcilePendingDependencies(playerId){
@@ -318,7 +365,6 @@ function reconcilePendingDependencies(playerId){
         }else if(pending.verdict==='rejected'){
             pending.nextState=makeNoopState(state,command,{advanceTick:pending.advanceTick});
         }else{
-            // Its exact dependency still exists, so keep the existing verdict/certificate and rebase only the cached state.
             pending.nextState=predictNextState(state,command);
         }
         state={...pending.nextState};
@@ -344,17 +390,16 @@ function rebuildVisible(playerId){
     else queueRemoteRenderTarget(playerId,state);
 }
 
-function acceptDeferred(playerId){
+function acceptDeferred(playerId,stream='simulation'){
     let progressed=true;
     while(progressed){
         progressed=false;
-        const expected=expectedSequenceFor(playerId);
-        const item=deferredAtSequence(playerId,expected);
+        const expected=expectedSequenceFor(playerId,stream);
+        const item=deferredAtStreamSequence(playerId,expected,stream);
         if(!item) break;
         clearDeferredCommand(item.command.commandId);
         ingestCommand(item.command,item.remote,{reentry:true});
         progressed=true;
-        // If it was deferred again, stop spinning until the retry/resync condition changes.
-        if(deferredAtSequence(playerId,expected)) break;
+        if(deferredAtStreamSequence(playerId,expected,stream)) break;
     }
 }

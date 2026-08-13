@@ -2,7 +2,7 @@
 
 새 기능보다 아래 순서로 닫는 것이 우선입니다.
 
-1. **Evidence authenticity**: shoot checkpoint가 실제 관측 상태였음을 validator가 독립적으로 증명하지 못함.
+1. **Evidence authenticity**: r4는 checkpoint item을 historical simulation sequence와 교차검증하지만, cache가 없는 상태에서는 checkpoint가 실제 관측 상태였음을 독립적으로 증명하지 못함.
 2. **Heal rule truth**: `1초 정지`는 현재 command 생성측 규칙이고 validator의 독립 evidence가 없음.
 3. **Deterministic respawn time**: `performance.now()` 기반 판정 제거 필요.
 4. **Cryptographic commitment**: 32-bit `stableHash()`는 보안 commitment가 아님.
@@ -25,3 +25,12 @@
 - Large tick disagreement is CLOCK_MODEL_DIVERGED -> RESYNC, not an attributable protocol fault.
 - A rejected event only invalidates later pending events whose previousStateHash no longer matches the canonical prefix.
 - Late certificates cannot resurrect dependency-invalidated events.
+
+## r4 dual-stream correction
+
+- SHOOT은 simulation sequence에서 분리되어 독립 `eventSeq`로 finalize된다.
+- SHOOT evidence는 `simulationRef(sequence,stateHash) + aim`으로 발사 당시 pose를 참조한다.
+- unresolved/rejected SHOOT은 movement sequence finality를 head-of-line block하지 않는다.
+- SHOOT rejection은 movement profile을 rebase하지 않는다.
+- checkpoint local consistency check는 current position이 아니라 checkpoint의 historical sequence를 사용한다.
+- heal/respawn은 아직 actor state mutation 때문에 simulation stream에 남아 있다.

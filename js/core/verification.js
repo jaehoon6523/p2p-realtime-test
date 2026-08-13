@@ -1,7 +1,7 @@
 'use strict';
 
-// HotStuff-inspired narrow borrowing: a certificate must be bound to one exact evidence/proposal hash.
-// This is NOT global consensus; the signaling server only aggregates the assigned validator receipts.
+// HotStuff-inspired narrow borrowing: a certificate is bound to one exact evidence hash.
+// Finality remains per command stream; this is not global consensus.
 function runAudit(command){
     const pending=pendingById.get(command.commandId);
     if(!pending) return;
@@ -17,7 +17,8 @@ function runAudit(command){
         rulesetRevision:RULESET_REVISION,
         commandId:command.commandId,
         playerId:command.playerId,
-        sequence:command.sequence,
+        stream:commandStream(command),
+        streamSeq:commandStreamSequence(command),
         assignmentId:command.assignmentId,
         decision,
         reason:result.reason,
@@ -29,7 +30,6 @@ function runAudit(command){
         if(!sendSignal({type:'verification-receipt',receipt})) log('t-warn',`verification receipt signaling failed id=${command.commandId}`);
     });
 
-    // Timing uncertainty is not a negative vote. Retry after the uncertainty window instead.
     if(result.disposition===RULE_DISPOSITION.DEFER&&Number.isFinite(result.retryMs)){
         setTimeout(()=>{
             const live=pendingById.get(command.commandId);
@@ -58,11 +58,11 @@ function applyVerificationCertificate(certificate){
     const command=pending.command;
     if(pending.verdict==='rejected'&&pending.rejectCode==='DEPENDENCY_INVALIDATED'){
         ignoredCounter++;
-        if(AUTO_DEBUG) log('t-sys',`IGNORE late certificate for invalidated dependency seq=${command.sequence} id=${command.commandId}`);
+        if(AUTO_DEBUG) log('t-sys',`IGNORE late certificate for invalidated dependency ${commandSequenceText(command)} id=${command.commandId}`);
         return;
     }
-    if(certificate.playerId!==command.playerId||certificate.sequence!==command.sequence||certificate.assignmentId!==command.assignmentId){
-        reportProtocolFault(command,'CERTIFICATE_BINDING_MISMATCH',`certificate identity/sequence/assignment mismatch id=${certificate.commandId}`,{remote:false});
+    if(certificate.playerId!==command.playerId||certificate.stream!==commandStream(command)||certificate.streamSeq!==commandStreamSequence(command)||certificate.assignmentId!==command.assignmentId){
+        reportProtocolFault(command,'CERTIFICATE_BINDING_MISMATCH',`certificate identity/stream/sequence/assignment mismatch id=${certificate.commandId}`,{remote:false});
         return;
     }
     const expectedEvidenceHash=commandFingerprint(command);
@@ -75,8 +75,8 @@ function applyVerificationCertificate(certificate){
     pending.certificateServerTime=Number.isFinite(certificate.serverTime)?certificate.serverTime:null;
     pending.rejectCode=pending.verdict==='accepted'?null:(certificate.resultCode||'QUORUM_REJECTED');
     pending.rejectReason=pending.verdict==='accepted'?null:'server quorum certificate rejected';
-    pending.advanceTick=true;
+    pending.advanceTick=commandStream(command)==='simulation';
     clearTimeout(pending.timeoutId);
-    log(pending.verdict==='accepted'?'t-audit':'t-warn',`CERTIFICATE ${pending.verdict.toUpperCase()} seq=${command.sequence} id=${command.commandId} evidence=${certificate.evidenceHash||'-'}`);
-    drainCommits(command.playerId);
+    log(pending.verdict==='accepted'?'t-audit':'t-warn',`CERTIFICATE ${pending.verdict.toUpperCase()} ${commandSequenceText(command)} id=${command.commandId} evidence=${certificate.evidenceHash||'-'}`);
+    if(commandStream(command)==='event') drainEventCommits(command.playerId); else drainCommits(command.playerId);
 }

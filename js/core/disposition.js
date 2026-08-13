@@ -1,8 +1,7 @@
 'use strict';
 
-// Arrival handling is deliberately separate from game-rule verdicts.
-// PeerReview-inspired rule: same sequence + different event is evidence of equivocation;
-// ordinary duplicates, reordering and repairable state mismatch are not trust faults.
+// Arrival handling is separate from game-rule verdicts.
+// Sequence identity is per stream: simulation and consequential events do not block each other.
 const ARRIVAL_DISPOSITION = Object.freeze({
     PROCEED:'PROCEED',
     IGNORE:'IGNORE',
@@ -24,20 +23,27 @@ function commandFingerprint(command){
     return stableHash(command);
 }
 
-function historyFor(playerId){
-    let history=finalizedEventHistory.get(playerId);
-    if(!history){ history=new Map(); finalizedEventHistory.set(playerId,history); }
+function historyFor(playerId,stream='simulation'){
+    const root=stream==='event'?finalizedCombatEventHistory:finalizedEventHistory;
+    let history=root.get(playerId);
+    if(!history){ history=new Map(); root.set(playerId,history); }
     return history;
 }
 
-function finalizedRecord(playerId,sequence){
-    return finalizedEventHistory.get(playerId)?.get(sequence)||null;
+function finalizedRecord(playerId,sequence){ return finalizedEventHistory.get(playerId)?.get(sequence)||null; }
+function finalizedEventRecord(playerId,eventSeq){ return finalizedCombatEventHistory.get(playerId)?.get(eventSeq)||null; }
+
+function finalizedRecordForCommand(command){
+    const stream=commandStream(command),seq=commandStreamSequence(command);
+    return stream==='event'?finalizedEventRecord(command.playerId,seq):finalizedRecord(command.playerId,seq);
 }
 
 function recordFinalizedEvent(command,disposition,reason,{beforeHash=null,afterHash=null,code=null}={}){
-    const history=historyFor(command.playerId);
-    history.set(command.sequence,{
-        sequence:command.sequence,
+    const stream=commandStream(command),sequence=commandStreamSequence(command);
+    const history=historyFor(command.playerId,stream);
+    history.set(sequence,{
+        stream,
+        sequence,
         commandId:command.commandId,
         fingerprint:commandFingerprint(command),
         disposition,
@@ -53,72 +59,85 @@ function recordFinalizedEvent(command,disposition,reason,{beforeHash=null,afterH
     }
 }
 
-function pendingAtSequence(playerId,sequence){
-    for(const id of pendingOrderByPlayer.get(playerId)||[]){
+function orderForStream(playerId,stream='simulation'){
+    return (stream==='event'?pendingEventOrderByPlayer:pendingOrderByPlayer).get(playerId)||[];
+}
+
+function pendingAtStreamSequence(playerId,sequence,stream='simulation'){
+    for(const id of orderForStream(playerId,stream)){
         const pending=pendingById.get(id);
-        if(pending?.command.sequence===sequence) return pending;
+        if(pending&&commandStreamSequence(pending.command)===sequence) return pending;
     }
     return null;
 }
+function pendingAtSequence(playerId,sequence){ return pendingAtStreamSequence(playerId,sequence,'simulation'); }
+function pendingAtEventSequence(playerId,eventSeq){ return pendingAtStreamSequence(playerId,eventSeq,'event'); }
 
-function deferredAtSequence(playerId,sequence){
-    for(const item of deferredCommands.values()) if(item.command.playerId===playerId&&item.command.sequence===sequence) return item;
+function deferredAtStreamSequence(playerId,sequence,stream='simulation'){
+    for(const item of deferredCommands.values()){
+        if(item.command.playerId===playerId&&commandStream(item.command)===stream&&commandStreamSequence(item.command)===sequence) return item;
+    }
     return null;
 }
+function deferredAtSequence(playerId,sequence){ return deferredAtStreamSequence(playerId,sequence,'simulation'); }
+function deferredAtEventSequence(playerId,eventSeq){ return deferredAtStreamSequence(playerId,eventSeq,'event'); }
 
-function expectedSequenceFor(playerId){
-    let expected=(confirmedSeq.get(playerId)||0)+1;
-    const pendingSeqs=new Set((pendingOrderByPlayer.get(playerId)||[]).map(id=>pendingById.get(id)?.command.sequence).filter(Number.isSafeInteger));
+function confirmedStreamSequence(playerId,stream='simulation'){
+    return stream==='event'?(confirmedEventSeq.get(playerId)||0):(confirmedSeq.get(playerId)||0);
+}
+
+function expectedSequenceFor(playerId,stream='simulation'){
+    let expected=confirmedStreamSequence(playerId,stream)+1;
+    const pendingSeqs=new Set(orderForStream(playerId,stream).map(id=>commandStreamSequence(pendingById.get(id)?.command)).filter(Number.isSafeInteger));
     while(pendingSeqs.has(expected)) expected++;
     return expected;
 }
 
 function classifySequenceArrival(command){
-    const fingerprint=commandFingerprint(command);
-    const finalized=finalizedRecord(command.playerId,command.sequence);
+    const stream=commandStream(command),sequence=commandStreamSequence(command),fingerprint=commandFingerprint(command);
+    const finalized=finalizedRecordForCommand(command);
     if(finalized){
-        if(finalized.fingerprint===fingerprint) return {kind:ARRIVAL_DISPOSITION.IGNORE,code:'FINALIZED_DUPLICATE',reason:`already finalized seq=${command.sequence}`};
-        return {kind:ARRIVAL_DISPOSITION.FAULT,code:'EQUIVOCATION_FINALIZED',reason:`same sequence carries a different finalized event seq=${command.sequence}`};
+        if(finalized.fingerprint===fingerprint) return {kind:ARRIVAL_DISPOSITION.IGNORE,code:'FINALIZED_DUPLICATE',reason:`already finalized ${stream} seq=${sequence}`};
+        return {kind:ARRIVAL_DISPOSITION.FAULT,code:'EQUIVOCATION_FINALIZED',reason:`same ${stream} sequence carries a different finalized event seq=${sequence}`};
     }
 
-    const pending=pendingAtSequence(command.playerId,command.sequence);
+    const pending=pendingAtStreamSequence(command.playerId,sequence,stream);
     if(pending){
-        if(commandFingerprint(pending.command)===fingerprint) return {kind:ARRIVAL_DISPOSITION.IGNORE,code:'PENDING_DUPLICATE',reason:`already pending seq=${command.sequence}`};
-        return {kind:ARRIVAL_DISPOSITION.FAULT,code:'EQUIVOCATION_PENDING',reason:`same sequence carries a different pending event seq=${command.sequence}`};
+        if(commandFingerprint(pending.command)===fingerprint) return {kind:ARRIVAL_DISPOSITION.IGNORE,code:'PENDING_DUPLICATE',reason:`already pending ${stream} seq=${sequence}`};
+        return {kind:ARRIVAL_DISPOSITION.FAULT,code:'EQUIVOCATION_PENDING',reason:`same ${stream} sequence carries a different pending event seq=${sequence}`};
     }
 
-    const deferred=deferredAtSequence(command.playerId,command.sequence);
+    const deferred=deferredAtStreamSequence(command.playerId,sequence,stream);
     if(deferred){
-        if(commandFingerprint(deferred.command)===fingerprint) return {kind:ARRIVAL_DISPOSITION.IGNORE,code:'DEFERRED_DUPLICATE',reason:`already deferred seq=${command.sequence}`};
-        return {kind:ARRIVAL_DISPOSITION.FAULT,code:'EQUIVOCATION_DEFERRED',reason:`same sequence carries a different deferred event seq=${command.sequence}`};
+        if(commandFingerprint(deferred.command)===fingerprint) return {kind:ARRIVAL_DISPOSITION.IGNORE,code:'DEFERRED_DUPLICATE',reason:`already deferred ${stream} seq=${sequence}`};
+        return {kind:ARRIVAL_DISPOSITION.FAULT,code:'EQUIVOCATION_DEFERRED',reason:`same ${stream} sequence carries a different deferred event seq=${sequence}`};
     }
 
-    const expected=expectedSequenceFor(command.playerId);
-    if(command.sequence>expected) return {kind:ARRIVAL_DISPOSITION.DEFER,code:'SEQUENCE_GAP',reason:`waiting for seq=${expected}; got=${command.sequence}`};
-    if(command.sequence<expected){
-        // History may have been pruned. Without two conflicting authenticators, stale data is not a trust fault.
-        return {kind:ARRIVAL_DISPOSITION.IGNORE,code:'STALE_UNTRACKED',reason:`stale seq=${command.sequence}; expected=${expected}`};
+    const expected=expectedSequenceFor(command.playerId,stream);
+    if(sequence>expected) return {kind:ARRIVAL_DISPOSITION.DEFER,code:'SEQUENCE_GAP',reason:`waiting for ${stream} seq=${expected}; got=${sequence}`};
+    if(sequence<expected){
+        return {kind:ARRIVAL_DISPOSITION.IGNORE,code:'STALE_UNTRACKED',reason:`stale ${stream} seq=${sequence}; expected=${expected}`};
     }
-    return {kind:ARRIVAL_DISPOSITION.PROCEED,code:'EXPECTED',reason:'expected sequence'};
+    return {kind:ARRIVAL_DISPOSITION.PROCEED,code:'EXPECTED',reason:'expected stream sequence'};
 }
 
 function noteIgnored(command,code,reason){
     ignoredCounter++;
     if(code.includes('DUPLICATE')) duplicateCounter++;
-    if(AUTO_DEBUG) log('t-sys',`IGNORE ${code} player=${command.playerId} seq=${command.sequence} ${reason}`);
+    if(AUTO_DEBUG) log('t-sys',`IGNORE ${code} player=${command.playerId} ${commandSequenceText(command)} ${reason}`);
 }
 
 function reportProtocolFault(command,code,reason,{remote=false}={}){
     faultCounter++;
     invalidCounter++;
-    log('t-err',`FAULT ${code} player=${command?.playerId||'-'} seq=${command?.sequence??'-'} reason=${reason}`);
+    log('t-err',`FAULT ${code} player=${command?.playerId||'-'} ${command?commandSequenceText(command):'seq=-'} reason=${reason}`);
     // TODO(Trust Policy): only cryptographically attributable faults should affect trust/reputation.
     if(remote&&command?.playerId) requestPeerResync(command.playerId,`fault:${code}`);
 }
 
-function countDeferredForPlayer(playerId){
+function countDeferredForPlayer(playerId,stream=null){
     let count=0;
-    for(const item of deferredCommands.values()) if(item.command.playerId===playerId) count++;
+    for(const item of deferredCommands.values()) if(item.command.playerId===playerId&&(!stream||commandStream(item.command)===stream)) count++;
     return count;
 }
 
@@ -133,16 +152,16 @@ function clearDeferredCommand(commandId){
 }
 
 function deferCommand(command,remote,code,reason,{retryMs=null,reentry=false}={}){
-    const existing=deferredCommands.get(command.commandId);
-    if(!existing&&countDeferredForPlayer(command.playerId)>=MAX_DEFERRED_PER_PLAYER){
-        log('t-warn',`DEFER overflow player=${command.playerId}; requesting resync instead of growing memory`);
+    const existing=deferredCommands.get(command.commandId),stream=commandStream(command);
+    if(!existing&&countDeferredForPlayer(command.playerId,stream)>=MAX_DEFERRED_PER_PLAYER){
+        log('t-warn',`DEFER overflow player=${command.playerId} stream=${stream}; requesting resync instead of growing memory`);
         if(remote) requestPeerResync(command.playerId,'deferred-overflow');
         return false;
     }
     const firstDeferredAt=existing?.firstDeferredAt??performance.now();
     deferredCommands.set(command.commandId,{command,remote,code,reason,firstDeferredAt,lastDeferredAt:performance.now()});
     if(!existing) deferredCounter++;
-    if(AUTO_DEBUG||code!=='SEQUENCE_GAP') log('t-sys',`DEFER ${code} player=${command.playerId} seq=${command.sequence} reason=${reason}`);
+    if(AUTO_DEBUG||code!=='SEQUENCE_GAP') log('t-sys',`DEFER ${code} player=${command.playerId} ${commandSequenceText(command)} reason=${reason}`);
 
     clearTemporalTimer(command.commandId);
     if(Number.isFinite(retryMs)){
@@ -160,7 +179,7 @@ function retryDeferredCommand(commandId){
     if(performance.now()-item.firstDeferredAt>TEMPORAL_DEFER_MAX_MS&&item.code==='TICK_AHEAD'){
         deferredCommands.delete(commandId);
         if(item.remote) requestPeerResync(item.command.playerId,'temporal-defer-timeout');
-        log('t-warn',`RESYNC temporal timeout player=${item.command.playerId} seq=${item.command.sequence}`);
+        log('t-warn',`RESYNC temporal timeout player=${item.command.playerId} ${commandSequenceText(item.command)}`);
         return;
     }
     deferredCommands.delete(commandId);
@@ -174,43 +193,57 @@ function requestPeerResync(playerId,reason){
     lastResyncRequestAt.set(playerId,now);
     resyncCounter++;
     const local=confirmedWorld[playerId];
-    safeDataSend(playerId,{kind:'resyncRequest',request:{protocol:PROTOCOL,requesterId:myId,playerId,knownSequence:confirmedSeq.get(playerId)||0,knownStateHash:local?stateHash(local):null,reason:String(reason||'state mismatch').slice(0,120)}});
-    log('t-sys',`RESYNC request player=${playerId} known=${confirmedSeq.get(playerId)||0} reason=${reason}`);
+    safeDataSend(playerId,{kind:'resyncRequest',request:{protocol:PROTOCOL,requesterId:myId,playerId,knownSequence:confirmedSeq.get(playerId)||0,knownEventSequence:confirmedEventSeq.get(playerId)||0,knownStateHash:local?stateHash(local):null,reason:String(reason||'state mismatch').slice(0,120)}});
+    log('t-sys',`RESYNC request player=${playerId} known=${confirmedSeq.get(playerId)||0}/e${confirmedEventSeq.get(playerId)||0} reason=${reason}`);
     return true;
 }
 
 function receiveResyncRequest(remoteId,request){
     if(!request||request.protocol!==PROTOCOL||request.requesterId!==remoteId||request.playerId!==myId) return;
-    log('t-sys',`RESYNC requested by=${remoteId} peerKnown=${request.knownSequence??'-'} reason=${request.reason||'-'}`);
+    log('t-sys',`RESYNC requested by=${remoteId} peerKnown=${request.knownSequence??'-'}/e${request.knownEventSequence??'-'} reason=${request.reason||'-'}`);
     sendSnapshot(remoteId);
 }
 
-function reconcileEventStreamFromSnapshot(playerId,snapshotSequence){
-    // Raft-inspired repair principle, without Raft consensus: the snapshot covers every event
-    // through snapshotSequence. Later commands are not evidence of misbehavior; preserve them
-    // and replay from the repaired prefix instead of manufacturing a permanent sequence hole.
-    const future=[];
+function reconcileEventStreamFromSnapshot(playerId,snapshotSequence,snapshotEventSequence=confirmedEventSeq.get(playerId)||0){
+    // Simulation repair preserves commands after the snapshot prefix.
+    const futureSimulation=[];
     for(const id of [...(pendingOrderByPlayer.get(playerId)||[])]){
         const pending=pendingById.get(id);
         if(!pending) continue;
         clearTimeout(pending.timeoutId);
-        if(pending.command.sequence>snapshotSequence) future.push({command:pending.command,remote:pending.remote});
+        if(pending.command.sequence>snapshotSequence) futureSimulation.push({command:pending.command,remote:pending.remote});
         pendingById.delete(id);
     }
     pendingOrderByPlayer.set(playerId,[]);
+
+    // Event finality is independent. Snapshot eventSeq only trims events already represented by the snapshot.
+    const futureEvents=[];
+    for(const id of [...(pendingEventOrderByPlayer.get(playerId)||[])]){
+        const pending=pendingById.get(id);
+        if(!pending) continue;
+        clearTimeout(pending.timeoutId);
+        if(pending.command.eventSeq>snapshotEventSequence) futureEvents.push({command:pending.command,remote:pending.remote});
+        pendingById.delete(id);
+    }
+    pendingEventOrderByPlayer.set(playerId,[]);
+
     for(const [id,item] of [...deferredCommands]){
         if(item.command.playerId!==playerId) continue;
-        if(item.command.sequence<=snapshotSequence) clearDeferredCommand(id);
-        else future.push({command:item.command,remote:item.remote});
+        const stream=commandStream(item.command),seq=commandStreamSequence(item.command);
+        const covered=stream==='event'?seq<=snapshotEventSequence:seq<=snapshotSequence;
+        if(covered) clearDeferredCommand(id);
+        else if(stream==='event') futureEvents.push({command:item.command,remote:item.remote});
+        else futureSimulation.push({command:item.command,remote:item.remote});
     }
-    for(const item of future){
+    for(const item of [...futureSimulation,...futureEvents]){
         clearDeferredCommand(item.command.commandId);
-        deferCommand(item.command,item.remote,'POST_RESYNC_REPLAY',`replay after repaired prefix seq=${snapshotSequence}`,{reentry:true});
+        deferCommand(item.command,item.remote,'POST_RESYNC_REPLAY',`replay after repaired prefix sim=${snapshotSequence} event=${snapshotEventSequence}`,{reentry:true});
     }
     resyncCounter++;
 }
 
 function previousDispositionSupportsDependencyReject(command){
+    if(commandStream(command)!=='simulation') return false;
     const prior=finalizedRecord(command.playerId,command.sequence-1);
     return prior&&[FINAL_DISPOSITION.REJECTED,FINAL_DISPOSITION.INVALIDATED].includes(prior.disposition);
 }

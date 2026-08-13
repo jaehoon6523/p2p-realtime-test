@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r3';
+const RULESET_REVISION = 'pssf-v13-r4';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
@@ -49,6 +49,8 @@ const TEMPORAL_DEFER_MAX_MS = 1600;
 const TEMPORAL_RETRY_MIN_MS = 40;
 const MAX_DEFERRED_PER_PLAYER = 256;
 const MAX_LOCAL_PENDING = 32;
+const MAX_LOCAL_EVENT_PENDING = 4;
+const SIMULATION_HISTORY_LIMIT = 512;
 const FINALIZED_HISTORY_LIMIT = 512;
 const MAX_RANGE = 230; // combat ruleset은 AOI 설정과 독립
 const HIT_RADIUS = 14;
@@ -90,7 +92,9 @@ const disconnectTimers = new Map();
 const tearingDownPeers = new Set();
 const confirmedWorld = Object.create(null);
 const visibleWorld = Object.create(null);
-const confirmedSeq = new Map();
+const confirmedSeq = new Map(); // simulation stream sequence
+const confirmedEventSeq = new Map(); // consequential event stream sequence (shoot)
+const simulationStateHistory = new Map(); // playerId -> Map(simulation seq -> state variants)
 const tickAnchors = new Map();
 const activityAnchors = new Map();
 const moveState = Object.create(null); // local input segment only
@@ -127,10 +131,12 @@ const bullets = [];
 const botTelegraphs = new Map(); // optional server-bot prefire hints; never gameplay authority
 const hitFlashes = Object.create(null);
 const pendingById = new Map();
-const pendingOrderByPlayer = new Map();
+const pendingOrderByPlayer = new Map(); // simulation stream
+const pendingEventOrderByPlayer = new Map(); // consequential event stream
 const deferredCommands = new Map();
 const temporalRetryTimers = new Map();
-const finalizedEventHistory = new Map(); // playerId -> Map(sequence -> immutable-ish disposition summary)
+const finalizedEventHistory = new Map(); // simulation stream: playerId -> Map(sequence -> disposition)
+const finalizedCombatEventHistory = new Map(); // event stream: playerId -> Map(eventSeq -> disposition)
 const seenCommandIds = new Set();
 const seenCommandFingerprintById = new Map(); // commandId -> first observed event fingerprint
 const seenCommandQueue = [];
@@ -148,7 +154,8 @@ const networkMetrics = {
 };
 
 let membershipRevision = 0;
-let localSequence = 0;
+let localSequence = 0; // simulation stream
+let localEventSequence = 0; // consequential event stream
 let confirmedCounter = 0;
 let rejectedCounter = 0;
 let ignoredCounter = 0;
@@ -217,6 +224,45 @@ function stableHash(value){
 function stateHash(state){
     return stableHash({x:round6(state.x),y:round6(state.y),sequence:state.sequence,tick:state.tick,hp:state.hp,alive:state.alive,lifeId:state.lifeId,deadServerAt:Number(state.deadServerAt)||0});
 }
+function simulationRefHash(state){
+    // Combat events bind to the actor's historical simulation pose/life, not mutable HP bookkeeping.
+    return stableHash({x:round6(state.x),y:round6(state.y),sequence:state.sequence,tick:state.tick,alive:Boolean(state.alive),lifeId:state.lifeId});
+}
+function commandStream(command){ return command?.type==='shoot'?'event':'simulation'; }
+function commandStreamSequence(command){ return commandStream(command)==='event'?command?.eventSeq:command?.sequence; }
+function commandSequenceText(command){ return commandStream(command)==='event'?`eventSeq=${command?.eventSeq??'-'}`:`seq=${command?.sequence??'-'}`; }
+function historyVariantsFor(playerId){
+    let history=simulationStateHistory.get(playerId);
+    if(!history){ history=new Map(); simulationStateHistory.set(playerId,history); }
+    return history;
+}
+function rememberSimulationState(playerId,state){
+    if(!playerId||!state||!Number.isSafeInteger(state.sequence)) return;
+    const history=historyVariantsFor(playerId);
+    const variants=history.get(state.sequence)||[];
+    const hash=simulationRefHash(state);
+    if(!variants.some(v=>simulationRefHash(v)===hash)) variants.push({...state,tentative:false});
+    if(variants.length>4) variants.shift();
+    history.set(state.sequence,variants);
+    while(history.size>SIMULATION_HISTORY_LIMIT){ const oldest=history.keys().next().value; history.delete(oldest); }
+}
+function simulationStateCandidates(playerId,sequence){
+    const result=[];
+    const push=state=>{ if(!state||state.sequence!==sequence) return; const h=simulationRefHash(state); if(!result.some(v=>simulationRefHash(v)===h)) result.push(state); };
+    push(confirmedWorld[playerId]);
+    for(const id of pendingOrderByPlayer.get(playerId)||[]) push(pendingById.get(id)?.nextState);
+    for(const state of simulationStateHistory.get(playerId)?.get(sequence)||[]) push(state);
+    return result;
+}
+function resolveSimulationReference(playerId,ref){
+    if(!ref||!Number.isSafeInteger(ref.sequence)||ref.sequence<0||typeof ref.stateHash!=='string') return {status:'invalid',state:null};
+    const candidates=simulationStateCandidates(playerId,ref.sequence);
+    const exact=candidates.find(state=>simulationRefHash(state)===ref.stateHash);
+    if(exact) return {status:'ok',state:{...exact}};
+    if(candidates.length) return {status:'mismatch',state:{...candidates[0]}};
+    const maxKnown=Math.max(confirmedSeq.get(playerId)||0,...(pendingOrderByPlayer.get(playerId)||[]).map(id=>pendingById.get(id)?.command.sequence||0));
+    return {status:ref.sequence>maxKnown?'pending':'missing',state:null};
+}
 function sanitizeRoomId(value){ return (String(value||'default').trim().slice(0,64)||'default').replace(/[^a-zA-Z0-9_.:-]/g,'_'); }
 function normalizeSignalUrl(value){
     if(!value) return null;
@@ -231,4 +277,4 @@ function screenToWorld(clientX,clientY){
     const y=(clientY-rect.top)/Math.max(1,rect.height)*WORLD_HEIGHT;
     return clampWorldPoint(x,y);
 }
-function createCommandId(playerId,sequence){ return `${playerId}:${sequence}:${randomId(12)}`; }
+function createCommandId(playerId,sequence,stream='simulation'){ return `${playerId}:${stream==='event'?'e':'s'}${sequence}:${randomId(12)}`; }

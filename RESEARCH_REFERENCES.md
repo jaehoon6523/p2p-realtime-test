@@ -61,3 +61,19 @@
 - HotStuff view-change/3-chain consensus
 
 즉 논문을 가져오는 기준은 "유명하니까"가 아니라 **지금 가진 문제와 동일한 실패 모드에 대해 이미 검증된 원칙이 있는가**입니다.
+
+## 6. numbered movement timeline + historical shot resolution
+
+**Riot Games. _Peeking into VALORANT's Netcode_ (2020).**
+
+- Riot: https://www.riotgames.com/en/news/peeking-valorants-netcode
+- 공개 설명에서 확인되는 점: movement를 fixed-timestep의 numbered move로 다루고, client/server가 move timeline의 대응 관계를 유지한다. 발사 시 server는 현재 world가 아니라 발사자가 보고 있던 simulation time으로 world state를 rewind해 hit registration을 수행한다.
+- **PSSF r4 adaptation**: simulation state의 `sequence`와 quorum 대상 `eventSeq`를 분리한다. SHOOT은 `simulationRef(sequence,stateHash)`를 통해 발사 origin/life를 고정하고, `aimX/aimY`만 의도 입력으로 전달한다. event certificate가 늦어도 movement simulation sequence를 막지 않는다.
+- 차이: VALORANT는 중앙 authoritative server history를 사용한다. PSSF는 peer가 보존한 bounded historical simulation state와 self-contained checkpoint를 validator가 교차검증한다.
+
+**Yahn W. Bernier / Valve. _Latency Compensating Methods in Client/Server In-game Protocol Design and Optimization_.**
+
+- Valve Developer Community: https://developer.valvesoftware.com/w/index.php?title=Latency_Compensating_Methods_in_Client%2FServer_In-game_Protocol_Design_and_Optimization&uselang=en
+- 공개 설명에서 확인되는 점: `usercmd_t`는 view angles, movement intent, attack buttons와 command simulation duration을 전달하며, lag compensation은 command가 생성된 시점의 historical player state로 다른 player들을 되감아 weapon firing을 실행한다.
+- **PSSF r4 adaptation**: 발사자가 임의의 authoritative origin을 주장하게 하지 않고 historical simulation reference에서 origin을 얻는다. checkpoint 검증도 validator의 **현재** 좌표와 비교하지 않고 checkpoint item의 simulation sequence에 해당하는 history와 비교한다.
+- 가져오지 않은 것: Source/VALORANT의 중앙 서버 rewind 전체를 복제하지 않는다. PSSF의 bounded history/evidence 구조에 필요한 원칙만 사용한다.

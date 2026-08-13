@@ -13,7 +13,7 @@
 Expected startup log:
 
 ```text
-[p2p-arena-signaling] protocol=5 ruleset=pssf-v13-r3 base<=5 sim<=16 listening ws://0.0.0.0:<PORT>
+[p2p-arena-signaling] protocol=5 ruleset=pssf-v13-r4 base<=5 sim<=16 listening ws://0.0.0.0:<PORT>
 ```
 
 ## GitHub Pages
