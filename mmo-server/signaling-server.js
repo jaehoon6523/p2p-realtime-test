@@ -22,6 +22,7 @@ const POLICY_GRACE_MS = 15_000;
 const RECEIPT_TTL_MS = 10_000;
 const TOPOLOGY_RECOMPUTE_DELAY_MS = 120;
 const DEFAULT_COMMITTEE = 3;
+const PEER_RELAY_TYPES = new Set(['offer', 'answer', 'ice', 'wire']);
 
 /** @type {Map<string, any>} */
 const rooms = new Map();
@@ -298,6 +299,10 @@ wss.on('connection', socket => {
       self.aoiRadius = clampNumber(message.aoiRadius, self.aoiRadius || DEFAULT_AOI, MIN_AOI, MAX_AOI); scheduleRecompute(room, 'presence'); return;
     }
     if (message.type === 'verification-receipt') { handleVerificationReceipt(room, session, message); return; }
+    if (!PEER_RELAY_TYPES.has(message.type)) {
+      safeSend(socket, { type: 'relay-error', reason: `peer relay type is not allowed: ${String(message.type || 'unknown').slice(0, 64)}`, signalProtocol: SIGNAL_PROTOCOL });
+      return;
+    }
     const to = typeof message.to === 'string' ? message.to : '';
     const allowed = new Set(self.policy?.directPeers || []);
     if (!to || !allowed.has(to)) { safeSend(socket, { type: 'relay-error', reason: 'target is not in assigned direct topology', to, signalProtocol: SIGNAL_PROTOCOL }); return; }
