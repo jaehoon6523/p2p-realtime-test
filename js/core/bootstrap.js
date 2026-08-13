@@ -34,7 +34,13 @@ setInterval(()=>{
     document.getElementById('ignoredStat').textContent=ignoredCounter;
     document.getElementById('deferredStat').textContent=deferredCounter;
     document.getElementById('resyncStat').textContent=resyncCounter;
-    document.getElementById('faultStat').textContent=faultCounter;
+    const faultEl=document.getElementById('faultStat');
+    faultEl.textContent=faultCounter;
+    faultEl.dataset.state=faultCounter>0?'bad':'';
+    const stalledNow=[...pendingById.values()].filter(p=>p?.stalled&&!p?.verdict).length;
+    const stalledNowEl=document.getElementById('stalledCurrentStat');
+    stalledNowEl.textContent=stalledNow;
+    stalledNowEl.dataset.state=stalledNow>0?'warn':'';
     document.getElementById('stalledStat').textContent=stalledCounter;
     document.getElementById('membershipMismatchStat').textContent=membershipMismatchCounter;
     const relayVisible=[...relayWorld.values()].filter(entry=>entry.expiresAt>performance.now()).length;

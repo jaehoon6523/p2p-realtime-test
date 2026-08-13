@@ -26,9 +26,12 @@ for(const rel of [
 ]) if(!refs.includes(rel)) throw new Error(`hardened entrypoint missing split module: ${rel}`);
 if(refs.includes('js/core/pssf-kernel.js')) throw new Error('legacy pssf-kernel.js reference remained');
 
-for(const id of ['ignoredStat','deferredStat','resyncStat','faultStat']){
+for(const id of ['ignoredStat','deferredStat','resyncStat','faultStat','stalledCurrentStat']){
   if(!html.includes(`id="${id}"`)) throw new Error(`hardened entrypoint missing protocol disposition UI: ${id}`);
 }
+
+if(!html.includes('<details class="runtimeDiagnostics">')) throw new Error('runtime diagnostics is not collapsed');
+if(html.includes('identity trust')) throw new Error('obsolete identity trust row remained in runtime panel');
 
 
 const launchText = fs.readFileSync(launcher,'utf8');
@@ -49,7 +52,7 @@ if(!bootstrap.includes('requestAnimationFrame(draw);')) throw new Error('render 
 
 const config = fs.readFileSync(must('js/core/config-state.js'),'utf8');
 const server = fs.readFileSync(must('mmo-server/signaling-server.js'),'utf8');
-for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r2';"]){
+for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r3';"]){
   if(!config.includes(expected)) throw new Error(`client missing ${expected}`);
   if(!server.includes(expected)) throw new Error(`server missing ${expected}`);
 }

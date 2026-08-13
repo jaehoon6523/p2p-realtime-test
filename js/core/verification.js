@@ -56,6 +56,11 @@ function applyVerificationCertificate(certificate){
         return;
     }
     const command=pending.command;
+    if(pending.verdict==='rejected'&&pending.rejectCode==='DEPENDENCY_INVALIDATED'){
+        ignoredCounter++;
+        if(AUTO_DEBUG) log('t-sys',`IGNORE late certificate for invalidated dependency seq=${command.sequence} id=${command.commandId}`);
+        return;
+    }
     if(certificate.playerId!==command.playerId||certificate.sequence!==command.sequence||certificate.assignmentId!==command.assignmentId){
         reportProtocolFault(command,'CERTIFICATE_BINDING_MISMATCH',`certificate identity/sequence/assignment mismatch id=${certificate.commandId}`,{remote:false});
         return;

@@ -18,3 +18,10 @@
 - server-only signal type은 peer relay surface에 들어가지 않는다.
 - UI는 protocol state를 소유하지 않는다.
 - 목표 설계와 현재 런타임 상태를 같은 단어로 부르지 않는다.
+
+## r3 clock/reject correction
+
+- Remote clock anchors are updated from command arrival/snapshot observations, never delayed commit time.
+- Large tick disagreement is CLOCK_MODEL_DIVERGED -> RESYNC, not an attributable protocol fault.
+- A rejected event only invalidates later pending events whose previousStateHash no longer matches the canonical prefix.
+- Late certificates cannot resurrect dependency-invalidated events.

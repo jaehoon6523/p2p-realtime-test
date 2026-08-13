@@ -38,7 +38,7 @@ function checkCommandTick(playerId,tick,previousTick){
     const anchor=tickAnchors.get(playerId);
     if(!anchor){
         const hard=previousTick+MAX_TICK_ADVANCE;
-        if(tick<=hard) return {disposition:RULE_DISPOSITION.ACCEPT,code:'TICK_UNANCHORED_OK',reason:'unanchored tick within bounded advance',advanceTick:true};
+        if(tick<=hard){ tickAnchors.set(playerId,{remoteTick:tick,localTime:performance.now()}); return {disposition:RULE_DISPOSITION.ACCEPT,code:'TICK_UNANCHORED_OK',reason:'unanchored tick within bounded advance',advanceTick:true}; }
         return {disposition:RULE_DISPOSITION.RESYNC,code:'TICK_UNANCHORED_FAR',reason:`unanchored future tick got=${tick} max=${hard}`,advanceTick:false};
     }
 
@@ -46,12 +46,12 @@ function checkCommandTick(playerId,tick,previousTick){
     const expected=anchor.remoteTick+elapsed;
     const softMax=expected+REMOTE_TICK_SOFT_AHEAD;
     const hardMax=expected+REMOTE_TICK_HARD_AHEAD;
-    if(tick<=softMax) return {disposition:RULE_DISPOSITION.ACCEPT,code:'TICK_OK',reason:`remote tick ok expected~${expected} got=${tick}`,advanceTick:true};
+    if(tick<=softMax){ if(tick>anchor.remoteTick) tickAnchors.set(playerId,{remoteTick:tick,localTime:performance.now()}); return {disposition:RULE_DISPOSITION.ACCEPT,code:'TICK_OK',reason:`remote tick ok expected~${expected} got=${tick}`,advanceTick:true}; }
     if(tick<=hardMax){
         const retryMs=Math.max(TEMPORAL_RETRY_MIN_MS,(tick-softMax)*TICK_MS);
         return {disposition:RULE_DISPOSITION.DEFER,code:'TICK_AHEAD',reason:`remote tick slightly ahead expected~${expected} got=${tick} softMax=${softMax}`,retryMs,advanceTick:false};
     }
-    return {disposition:RULE_DISPOSITION.FAULT,code:'TICK_FAR_FUTURE',reason:`remote tick implausibly ahead expected~${expected} got=${tick} hardMax=${hardMax}`,advanceTick:false};
+    return {disposition:RULE_DISPOSITION.RESYNC,code:'CLOCK_MODEL_DIVERGED',reason:`remote tick exceeds current clock model expected~${expected} got=${tick} hardMax=${hardMax}`,advanceTick:false};
 }
 
 function inBounds(x,y){

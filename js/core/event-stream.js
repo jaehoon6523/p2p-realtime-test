@@ -91,6 +91,7 @@ function executeLocal(command){
     for(const id of policy?.directPeers||[]) if(isPeerOpen(id)) safeDataSend(id,{kind:'command',command});
 }
 
+
 function receiveCommand(remoteId,command){
     const validation=validateEnvelope(remoteId,command);
     if(!validation.ok){
@@ -257,7 +258,6 @@ function commitCommand(command,pending){
     confirmedWorld[command.playerId]=state;
     confirmedSeq.set(command.playerId,command.sequence);
     const commitNow=performance.now();
-    tickAnchors.set(command.playerId,{remoteTick:command.tick,localTime:commitNow});
     const activity=activityAnchors.get(command.playerId)||{lastMoveAt:commitNow,lastDamageAt:commitNow,lastHealAt:commitNow};
     if(command.type==='move') activity.lastMoveAt=commitNow;
     if(command.type==='heal') activity.lastHealAt=commitNow;
@@ -286,25 +286,43 @@ function finalizeRejectedCommand(command,pending){
     };
     confirmedWorld[command.playerId]=state;
     confirmedSeq.set(command.playerId,command.sequence);
-    if(pending.advanceTick) tickAnchors.set(command.playerId,{remoteTick:state.tick,localTime:performance.now()});
     removePending(command);
     rejectedCounter++;
     recordFinalizedEvent(command,pending.rejectCode==='DEPENDENCY_INVALIDATED'?FINAL_DISPOSITION.INVALIDATED:FINAL_DISPOSITION.REJECTED,pending.rejectReason||'rejected',{beforeHash,afterHash:stateHash(state),code:pending.rejectCode});
     log('t-warn',`REJECTED-NOOP seq=${command.sequence} id=${command.commandId} code=${pending.rejectCode||'REJECTED'} reason=${pending.rejectReason||'-'}`);
 
-    invalidateDependentPendings(command.playerId,command.sequence);
+    reconcilePendingDependencies(command.playerId);
 }
 
-function invalidateDependentPendings(playerId,sequence){
-    for(const id of pendingOrderByPlayer.get(playerId)||[]){
+function reconcilePendingDependencies(playerId){
+    let state=confirmedWorld[playerId];
+    if(!state) return;
+    let expected=(confirmedSeq.get(playerId)||0)+1;
+    const ids=[...(pendingOrderByPlayer.get(playerId)||[])].sort((a,b)=>(pendingById.get(a)?.command.sequence||0)-(pendingById.get(b)?.command.sequence||0));
+    for(const id of ids){
         const pending=pendingById.get(id);
-        if(!pending||pending.command.sequence<=sequence) continue;
-        clearTimeout(pending.timeoutId);
-        pending.verdict='rejected';
-        pending.rejectCode='DEPENDENCY_INVALIDATED';
-        pending.rejectReason=`depends on non-accepted seq=${sequence}`;
-        pending.advanceTick=false;
-        pending.nextState=makeNoopState(pending.previousState,pending.command,{advanceTick:false});
+        if(!pending) continue;
+        const command=pending.command;
+        if(command.sequence<expected) continue;
+        if(command.sequence>expected) break;
+
+        pending.previousState={...state};
+        const dependencyMatches=command.previousStateHash===stateHash(state);
+        if(!dependencyMatches){
+            clearTimeout(pending.timeoutId);
+            pending.verdict='rejected';
+            pending.rejectCode='DEPENDENCY_INVALIDATED';
+            pending.rejectReason=`previousStateHash no longer matches canonical prefix at seq=${command.sequence-1}`;
+            pending.advanceTick=false;
+            pending.nextState=makeNoopState(state,command,{advanceTick:false});
+        }else if(pending.verdict==='rejected'){
+            pending.nextState=makeNoopState(state,command,{advanceTick:pending.advanceTick});
+        }else{
+            // Its exact dependency still exists, so keep the existing verdict/certificate and rebase only the cached state.
+            pending.nextState=predictNextState(state,command);
+        }
+        state={...pending.nextState};
+        expected++;
     }
 }
 

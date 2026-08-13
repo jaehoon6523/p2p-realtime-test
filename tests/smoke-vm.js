@@ -50,10 +50,12 @@ vm.runInContext(`
   tickAnchors.set('peerA',{remoteTick:100,localTime:performance.now()});
   const nearFuture=checkCommandTick('peerA',113,100);
   if(nearFuture.disposition!=='ACCEPT') throw new Error('ordinary clock lead was not tolerated: '+JSON.stringify(nearFuture));
+  tickAnchors.set('peerA',{remoteTick:100,localTime:performance.now()});
   const uncertainFuture=checkCommandTick('peerA',119,100);
   if(uncertainFuture.disposition!=='DEFER') throw new Error('moderate clock uncertainty should defer, not reject/fault: '+JSON.stringify(uncertainFuture));
+  tickAnchors.set('peerA',{remoteTick:100,localTime:performance.now()});
   const absurdFuture=checkCommandTick('peerA',191,100);
-  if(absurdFuture.disposition!=='FAULT') throw new Error('grossly implausible clock lead was not isolated as a fault candidate: '+JSON.stringify(absurdFuture));
+  if(absurdFuture.disposition!=='RESYNC'||absurdFuture.code!=='CLOCK_MODEL_DIVERGED') throw new Error('gross clock disagreement should request repair, not become a trust fault: '+JSON.stringify(absurdFuture));
 
   // A semantic rejection is a canonical no-op and consumes its sequence.
   localSequence=1;
@@ -85,7 +87,7 @@ vm.runInContext(`
   const r2=finalizedRecord(myId,2);
   if(!r2||r2.disposition!=='INVALIDATED') throw new Error('dependency invalidation was not recorded');
 
-  // Delayed quorum reject must consume the rejected sequence AND invalidate already-issued dependents without a hole.
+  // Delayed quorum reject consumes its sequence, but state-independent dependents survive when their previousStateHash still matches.
   storeServerPolicy({peerId:myId,assignmentId:'self-a2',topologyEpoch:2,validatorIds:['peerA'],quorum:1,rulesetRevision:RULESET_REVISION,directPeers:['peerA'],topologyPeers:['peerA'],simulationPeers:[]},{self:true});
   serverPeerCount=2;
   localSequence=3;
@@ -102,8 +104,18 @@ vm.runInContext(`
   applyVerificationCertificate({signalProtocol:SIGNAL_PROTOCOL,commandId:'shoot-3',playerId:myId,sequence:3,assignmentId:'self-a2',verdict:'rejected',evidenceHash:commandFingerprint(shoot3),resultCode:'SHOOT_INVALID',serverTime:Date.now()});
   if((confirmedSeq.get(myId)||0)!==4) throw new Error('quorum rejection left a sequence hole');
   if(finalizedRecord(myId,3)?.disposition!=='REJECTED') throw new Error('quorum reject not finalized as noop');
-  if(finalizedRecord(myId,4)?.disposition!=='INVALIDATED') throw new Error('dependent event not invalidated as noop');
+  if(finalizedRecord(myId,4)?.disposition!=='ACCEPTED') throw new Error('state-independent dependent was over-invalidated after shoot rejection');
   if(localSequence!==4) throw new Error('local sequence was rewound/reused after rejection');
+
+  // Commit latency must not rewrite a remote clock anchor using an old command tick.
+  initializePlayer('peerClock',350,350,colorFor('peerClock'),{tick:300,sequence:0});
+  storeServerPolicy({peerId:'peerClock',assignmentId:'peer-c1',topologyEpoch:1,validatorIds:[],quorum:0,rulesetRevision:RULESET_REVISION,directPeers:[],topologyPeers:[],simulationPeers:[]});
+  tickAnchors.set('peerClock',{remoteTick:350,localTime:performance.now()});
+  const clockBase={...confirmedWorld.peerClock};
+  const clockCmd={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,type:'move',commandId:'peerClock-1',playerId:'peerClock',sequence:1,previousStateHash:stateHash(clockBase),tick:301,topologyEpoch:1,assignmentId:'peer-c1',aoiRadius:AOI_RADIUS,dx:1,dy:0,claimedX:round6(clockBase.x+1),claimedY:clockBase.y};
+  const clockPending=addPending(clockCmd,true,{verdict:'accepted'});
+  commitCommand(clockCmd,clockPending);
+  if(tickAnchors.get('peerClock')?.remoteTick!==350) throw new Error('delayed commit rewound remote clock anchor');
 
   // Snapshot repair must preserve commands beyond the repaired prefix for replay.
   initializePlayer('peerB',300,300,colorFor('peerB'),{tick:200,sequence:5});
