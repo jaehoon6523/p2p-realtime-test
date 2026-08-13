@@ -3,7 +3,7 @@
 ## 바로가기
 
 Demo  
-https://jaehoon6523.github.io/p2p-realtime-test/p2p-mmo-demo-hardened.html?signal=wss://p2p-realtime-test.onrender.com\&room=test1
+https://jaehoon6523.github.io/p2p-realtime-test/p2p-mmo-demo-hardened.html?signal=wss://p2p-realtime-test.onrender.com&room=test1
 
 Render dashboard  
 https://dashboard.render.com/web/srv-d9pttum7bikc7383brig/env
@@ -57,19 +57,19 @@ p2p-realtime-test/
 수동 데모:
 
 ```text
-p2p-mmo-demo-hardened.html?signal=wss://p2p-realtime-test.onrender.com\&room=test1
+https://jaehoon6523.github.io/p2p-realtime-test/p2p-mmo-demo-hardened.html?signal=wss://p2p-realtime-test.onrender.com&room=test1
 ```
 
 AUTO peer:
 
 ```text
-p2p-mmo-demo-auto.html?signal=wss://p2p-realtime-test.onrender.com\&room=test1\&auto=1
+https://jaehoon6523.github.io/p2p-realtime-test/p2p-mmo-demo-auto.html?signal=wss://p2p-realtime-test.onrender.com&room=test1&auto=1
 ```
 
 AUTO 다중 실행:
 
 ```text
-p2p-mmo-auto-launcher.html?signal=wss://p2p-realtime-test.onrender.com\&room=test1\&count=3
+https://jaehoon6523.github.io/p2p-realtime-test/p2p-mmo-auto-launcher.html?signal=wss://p2p-realtime-test.onrender.com&room=test1&count=3
 ```
 
 Render signaling server:
