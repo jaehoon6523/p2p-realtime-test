@@ -30,7 +30,25 @@ function safeDataSend(remoteId,message){
     if(!peers.get(remoteId)||!isPeerOpen(remoteId)) return false;
     return scheduleNetem('tx',remoteId,message?.kind||'wire',()=>sendWireNow(remoteId,message));
 }
+function isBootstrapControlWire(raw){
+    try{
+        if(typeof raw!=='string'||raw.length>128*1024) return false;
+        const message=JSON.parse(raw);
+        return Boolean(
+            (message?.kind==='snapshot' && message?.snapshot?.bootstrap===true) ||
+            message?.kind==='snapshotAck'
+        );
+    }catch(_){ return false; }
+}
 function deliverWireMessage(remoteId,raw){
+    // Bootstrap establishes the base state that every later command references.
+    // Delaying it in the synthetic RX netem queue can invert logical delivery even
+    // when the underlying DataChannel/WebSocket transport is ordered.
+    if(isBootstrapControlWire(raw)){
+        if(pageUnloading||!peers.get(remoteId)||!isPeerOpen(remoteId)) return false;
+        handleWireMessage(remoteId,raw);
+        return true;
+    }
     return scheduleNetem('rx',remoteId,'wire',()=>{
         if(pageUnloading||!peers.get(remoteId)||!isPeerOpen(remoteId)) return;
         handleWireMessage(remoteId,raw);

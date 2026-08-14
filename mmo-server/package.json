@@ -1,6 +1,6 @@
 {
   "name": "p2p-mmo-signaling",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "PSSF sparse signaling server for browser-native manual/auto peers",
   "main": "signaling-server.js",
   "scripts": {

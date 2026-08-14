@@ -33,7 +33,7 @@ p2p-realtime-test/
 
 - game protocol: **13**
 - signaling protocol: **5**
-- ruleset: **pssf-v13-r14**
+- ruleset: **pssf-v13-r15**
 - server-assigned actor policy: `assignmentId / topologyEpoch / validatorIds / quorum`
 - simulation stream (`move/heal/respawn`): actor state sequence + deterministic dependency chain
 - shoot event stream: independent `eventSeq` + `simulationRef(sequence,stateHash)` + aim vector
@@ -224,3 +224,7 @@ TODO(XML): replace `ability-definitions.js` as the data source with the planned 
 - Initial peer snapshot bypasses synthetic netem so it cannot be reordered behind seq=1 commands.
 - Receiver sends `snapshotAck` only after installing the base state.
 - AUTO movement/Q remains gated until every direct peer has ACKed the local bootstrap snapshot.
+
+### r15 bootstrap receive ordering
+
+Bootstrap `snapshot` and `snapshotAck` bypass both TX and RX synthetic netem queues. This preserves the required invariant: the receiver installs sequence-0/base state before any sequence-1+ command is admitted. Normal gameplay traffic still uses netem.

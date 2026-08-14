@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r14';
+const RULESET_REVISION = 'pssf-v13-r15';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());

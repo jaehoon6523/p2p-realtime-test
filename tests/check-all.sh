@@ -7,4 +7,6 @@ node "$ROOT/tests/layout-check.js"
 node "$ROOT/tests/smoke-vm.js"
 node "$ROOT/tests/server-qc-vm.js"
 node "$ROOT/tests/optimistic-contract.js"
+node "$ROOT/tests/bootstrap-ordering.js"
+node "$ROOT/tests/bootstrap-rx-ordering.js"
 echo 'PSSF all checks: PASS'
