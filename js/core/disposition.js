@@ -161,6 +161,72 @@ function abilityRefMatchesRecord(ref,record){
     if(!ref||!record) return false;
     return ref.abilitySeq===record.abilitySeq&&ref.abilityId===record.abilityId&&ref.castStartTick===record.castStartTick&&ref.releaseTick===record.releaseTick&&ref.abilityHash===record.abilityHash;
 }
+
+function compactAbilityTerminalRef(record){
+    if(!record) return null;
+    return {
+        abilitySeq:record.abilitySeq,
+        abilityId:record.abilityId,
+        castStartTick:record.castStartTick,
+        releaseTick:record.releaseTick,
+        abilityHash:record.abilityHash,
+        disposition:record.disposition||'UNKNOWN',
+    };
+}
+function validAbilityTerminalRef(ref,{maxSeq=Number.MAX_SAFE_INTEGER}={}){
+    return ref&&Number.isSafeInteger(ref.abilitySeq)&&ref.abilitySeq>=1&&ref.abilitySeq<=maxSeq&&
+        typeof ref.abilityId==='string'&&Boolean(ABILITY_BY_ID[ref.abilityId])&&
+        Number.isSafeInteger(ref.castStartTick)&&ref.castStartTick>=0&&
+        Number.isSafeInteger(ref.releaseTick)&&ref.releaseTick>=ref.castStartTick&&
+        typeof ref.abilityHash==='string'&&ref.abilityHash.length>0&&ref.abilityHash.length<=64;
+}
+// A bootstrap only needs the terminal ability prefix head plus the latest terminal for each ability id.
+// This is enough to validate previousAbilityRef, shared recovery, and previousSameAbilityRef/cooldown
+// for the next command without replaying the actor's entire pre-join combat history.
+function abilityCheckpointFor(playerId){
+    const confirmed=confirmedAbilitySeq.get(playerId)||0;
+    const history=finalizedAbilityHistory.get(playerId);
+    if(!confirmed||!history) return {confirmedAbilitySeq:0,last:null,lastByAbility:[]};
+    const last=compactAbilityTerminalRef(history.get(confirmed));
+    const latestByAbility=new Map();
+    for(const record of history.values()){
+        if(!record||record.abilitySeq>confirmed) continue;
+        const prev=latestByAbility.get(record.abilityId);
+        if(!prev||record.abilitySeq>prev.abilitySeq) latestByAbility.set(record.abilityId,record);
+    }
+    return {
+        confirmedAbilitySeq:confirmed,
+        last,
+        lastByAbility:[...latestByAbility.values()].map(compactAbilityTerminalRef).sort((a,b)=>a.abilitySeq-b.abilitySeq),
+    };
+}
+function importAbilityCheckpoint(playerId,checkpoint){
+    if(!checkpoint||!Number.isSafeInteger(checkpoint.confirmedAbilitySeq)||checkpoint.confirmedAbilitySeq<0) return 0;
+    const incoming=checkpoint.confirmedAbilitySeq;
+    const current=confirmedAbilitySeq.get(playerId)||0;
+    if(incoming<current) return 0;
+    if(incoming===0){
+        if(current===0) return 0;
+        return 0;
+    }
+    if(!validAbilityTerminalRef(checkpoint.last,{maxSeq:incoming})||checkpoint.last.abilitySeq!==incoming) return 0;
+    const sparse=[checkpoint.last,...(Array.isArray(checkpoint.lastByAbility)?checkpoint.lastByAbility:[])];
+    if(sparse.length>16) return 0;
+    for(const ref of sparse) if(!validAbilityTerminalRef(ref,{maxSeq:incoming})) return 0;
+    const history=abilityHistoryFor(playerId);
+    if(incoming>current){
+        for(const seq of [...history.keys()]) if(seq<=incoming) history.delete(seq);
+        const queue=pendingAbilityTerminals.get(playerId);
+        if(queue) for(const seq of [...queue.keys()]) if(seq<=incoming) queue.delete(seq);
+    }
+    for(const ref of sparse){
+        const existing=history.get(ref.abilitySeq);
+        if(existing&&existing.abilityHash!==ref.abilityHash) continue;
+        history.set(ref.abilitySeq,{...ref,commandId:existing?.commandId||`bootstrap:${playerId}:${ref.abilitySeq}`});
+    }
+    confirmedAbilitySeq.set(playerId,Math.max(current,incoming));
+    return sparse.length;
+}
 function queueAbilityTerminal(command,disposition){
     if(!command?.abilityId||!Number.isSafeInteger(command.abilitySeq)) return;
     abilityTerminalQueueFor(command.playerId).set(command.abilitySeq,{command,disposition});

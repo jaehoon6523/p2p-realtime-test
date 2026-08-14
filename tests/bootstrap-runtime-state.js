@@ -25,8 +25,8 @@ if(compactStart<0||importStart<0||sendStart<0||sendEnd<0) throw new Error('boots
 
 const c={
   SNAPSHOT_HISTORY_TAIL_SEQUENCES,HISTORY_REPAIR_MAX_STATES,
-  PROTOCOL:13,RULESET_REVISION:'pssf-v13-r26',myId:'me',AUTO_MODE:false,
-  simulationStateHistory:new Map(),confirmedWorld:Object.create(null),confirmedEventSeq:new Map(),
+  PROTOCOL:13,RULESET_REVISION:'pssf-v13-r27',myId:'me',AUTO_MODE:false,
+  simulationStateHistory:new Map(),confirmedWorld:Object.create(null),confirmedEventSeq:new Map(),confirmedAbilitySeq:new Map(),
   bootstrapSentPeers:new Set(),bootstrapPendingSince:new Map(),
   performance:{now:()=>1234},currentTick:()=>99,
   round6:n=>Math.round(n*1e6)/1e6,
@@ -35,6 +35,7 @@ const c={
   isPeerOpen:id=>id==='peer',
   sent:[],logs:[],
 };
+c.abilityCheckpointFor=()=>({confirmedAbilitySeq:5,last:{abilitySeq:5,abilityId:'dash',castStartTick:40,releaseTick:42,abilityHash:'h5'},lastByAbility:[]});
 c.sendWireNow=(id,message)=>{c.sent.push({id,message});return true;};
 c.safeDataSend=(id,message)=>{c.sent.push({id,message});return true;};
 c.log=(cls,msg)=>c.logs.push({cls,msg});
@@ -53,5 +54,6 @@ const wire=c.sent.find(x=>x.message?.kind==='snapshot');
 if(!wire) throw new Error('bootstrap snapshot was not emitted');
 if(wire.message.snapshot.bootstrap!==true) throw new Error('bootstrap flag missing');
 if(!Array.isArray(wire.message.snapshot.historyTail)) throw new Error('history tail missing from bootstrap snapshot');
+if(wire.message.snapshot.abilityCheckpoint?.confirmedAbilitySeq!==5) throw new Error('ability checkpoint missing from bootstrap snapshot');
 if(!c.bootstrapSentPeers.has('peer')) throw new Error('bootstrap send state was not recorded');
 console.log('PSSF bootstrap runtime state: PASS');

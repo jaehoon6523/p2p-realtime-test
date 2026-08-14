@@ -5,7 +5,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = Number(process.env.PORT) || 8090;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r26';
+const RULESET_REVISION = 'pssf-v13-r27';
 const MAX_ROOM_LENGTH = 96;
 const MAX_PEER_LENGTH = 96;
 const MAX_PAYLOAD = 128 * 1024;
@@ -246,6 +246,12 @@ function handleVerificationReceipt(room, session, message) {
   bucket.receipts.set(session.peerId, {
     validatorId: session.peerId, decision,
     reason: String(r.reason || '').slice(0, 240), resultCode, computedHash, evidenceHash,
+  });
+  safeSend(room.peers.get(actorId)?.socket, {
+    type:'verification-progress', signalProtocol:SIGNAL_PROTOCOL, channelId:room.channelId,
+    commandId, playerId:actorId, assignmentId, validatorId:session.peerId,
+    decision, resultCode, evidenceHash, computedHash,
+    received:bucket.receipts.size, quorum:policy.quorum, serverTime:Date.now(),
   });
   const decisive = [...bucket.receipts.values()].filter(x => x.decision !== 'abstain');
   const acceptGroups = new Map(), rejectGroups = new Map();

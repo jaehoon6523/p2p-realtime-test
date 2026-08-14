@@ -35,7 +35,7 @@ p2p-realtime-test/
 
 - game protocol: **13**
 - signaling protocol: **5**
-- ruleset: **pssf-v13-r26**
+- ruleset: **pssf-v13-r27**
 - server-assigned actor policy: `assignmentId / topologyEpoch / validatorIds / quorum`
 - simulation stream (`move/heal/respawn`): actor state sequence + deterministic dependency chain
 - shoot event stream: independent `eventSeq` + `simulationRef(sequence,stateHash)` + aim vector
@@ -258,3 +258,11 @@ Large frame gaps are still chunked below the movement validation limit. Retarget
 - The signaling server remains the authority that accepts receipts only from validatorIds bound to assignmentId.
 - Verification receipts survive transient signaling disconnects and retry after rejoin.
 - Runtime log toolbar includes an all-log clipboard copy button.
+
+
+## r27 runtime fixes
+
+- Bootstrap snapshots now carry the actor's terminal ability-lineage checkpoint (global abilitySeq head plus latest terminal per ability id), so validators that join mid-session can validate the next Q/W/E instead of abstaining at `known=0`.
+- Successful bootstrap writes are no longer retransmitted just because ACK telemetry is missing; reliable ordered transports already preserve delivery, and repeated snapshots were churning event replay.
+- Signaling emits server-authenticated `verification-progress` telemetry so the actor can see each received validator decision/result/evidence/computed hash before quorum.
+- Wire handlers surface runtime exceptions as `WIRE_HANDLER_FAILED` instead of dying silently inside a DataChannel callback.

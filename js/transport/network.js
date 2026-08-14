@@ -1,6 +1,6 @@
 'use strict';
 
-const SERVER_ONLY_SIGNAL_TYPES = new Set(['joined','join-error','topology-update','membership-summary','verification-certificate','relay-error']);
+const SERVER_ONLY_SIGNAL_TYPES = new Set(['joined','join-error','topology-update','membership-summary','verification-progress','verification-certificate','relay-error']);
 
 function byteLength(text){ return new TextEncoder().encode(text).byteLength; }
 function noteTraffic(direction,kind,bytes){
@@ -62,15 +62,20 @@ function receiveBotTelegraph(remoteId,telegraph){
 }
 function handleWireMessage(remoteId,raw){
     let message; try{ if(typeof raw!=='string'||raw.length>128*1024) throw new Error('message too large'); message=JSON.parse(raw); noteTraffic('rx',message.kind,byteLength(raw)); }catch(error){ invalidCounter++; log('t-err',`invalid JSON from=${remoteId}: ${error.message}`); return; }
-    if(message.kind==='command') receiveCommand(remoteId,message.command);
-    else if(message.kind==='snapshot') receiveSnapshot(remoteId,message.snapshot);
-    else if(message.kind==='snapshotAck') receiveSnapshotAck(remoteId,message.ack);
-    else if(message.kind==='historyRepair') receiveHistoryRepair(remoteId,message.repair);
-    else if(message.kind==='neighborDigest') receiveNeighborDigest(remoteId,message.digest);
-    else if(message.kind==='botTelegraph') receiveBotTelegraph(remoteId,message.telegraph);
-    else if(message.kind==='resyncRequest') receiveResyncRequest(remoteId,message.request);
-    else if(message.kind==='rebaseRequired') receiveRebaseRequired(remoteId,message.request);
-    else invalidCounter++;
+    try{
+        if(message.kind==='command') receiveCommand(remoteId,message.command);
+        else if(message.kind==='snapshot') receiveSnapshot(remoteId,message.snapshot);
+        else if(message.kind==='snapshotAck') receiveSnapshotAck(remoteId,message.ack);
+        else if(message.kind==='historyRepair') receiveHistoryRepair(remoteId,message.repair);
+        else if(message.kind==='neighborDigest') receiveNeighborDigest(remoteId,message.digest);
+        else if(message.kind==='botTelegraph') receiveBotTelegraph(remoteId,message.telegraph);
+        else if(message.kind==='resyncRequest') receiveResyncRequest(remoteId,message.request);
+        else if(message.kind==='rebaseRequired') receiveRebaseRequired(remoteId,message.request);
+        else invalidCounter++;
+    }catch(error){
+        invalidCounter++;
+        log('t-err',`WIRE_HANDLER_FAILED kind=${message.kind||'-'} from=${remoteId}: ${error.message}`);
+    }
 }
 
 function setRoomGate(state,title,detail=''){
@@ -152,6 +157,10 @@ async function handleSignalMessage(message){
         await applyTopologyAssignment(message.selfPolicy||{},message.reason||'update');
         refreshMembership('server topology update');
         signalLog('t-sig',`topology base=${desiredTopologyPeers.size} sim=${desiredSimulationPeers.size} direct=${desiredDirectPeers.size} assignment=${selfTopologyPolicy?.assignmentId||'n/a'}`);
+        return;
+    }
+    if(message.type==='verification-progress'){
+        applyVerificationProgress(message);
         return;
     }
     if(message.type==='verification-certificate'){
@@ -313,7 +322,7 @@ function removePeer(remoteId,reason='unknown'){
         if(peer.dc){ peer.dc.onopen=peer.dc.onmessage=peer.dc.onclose=peer.dc.onerror=null; }
         if(peer.pc){ peer.pc.onicecandidate=peer.pc.onconnectionstatechange=peer.pc.ondatachannel=null; }
         try{ if(peer.dc?.readyState!=='closed') peer.dc?.close(); }catch(_){} try{ if(peer.pc?.connectionState!=='closed') peer.pc?.close(); }catch(_){}
-        delete confirmedWorld[remoteId]; delete visibleWorld[remoteId]; delete moveState[remoteId]; delete remoteRenderState[remoteId]; delete hitFlashes[remoteId]; confirmedSeq.delete(remoteId); confirmedEventSeq.delete(remoteId); simulationStateHistory.delete(remoteId); tickAnchors.delete(remoteId); activityAnchors.delete(remoteId); prePeerIce.delete(remoteId); bootstrapAckPeers.delete(remoteId); bootstrapPendingSince.delete(remoteId); bootstrapAckState.delete(remoteId); bootstrapSentPeers.delete(remoteId);
+        delete confirmedWorld[remoteId]; delete visibleWorld[remoteId]; delete moveState[remoteId]; delete remoteRenderState[remoteId]; delete hitFlashes[remoteId]; confirmedSeq.delete(remoteId); confirmedEventSeq.delete(remoteId); confirmedAbilitySeq.delete(remoteId); finalizedAbilityHistory.delete(remoteId); pendingAbilityTerminals.delete(remoteId); simulationStateHistory.delete(remoteId); tickAnchors.delete(remoteId); activityAnchors.delete(remoteId); prePeerIce.delete(remoteId); bootstrapAckPeers.delete(remoteId); bootstrapPendingSince.delete(remoteId); bootstrapAckState.delete(remoteId); bootstrapSentPeers.delete(remoteId);
         for(const [id,pending] of [...pendingById]) if(pending.command.playerId===remoteId){ clearTimeout(pending.timeoutId); pendingById.delete(id); }
         pendingOrderByPlayer.delete(remoteId); pendingEventOrderByPlayer.delete(remoteId);
         if(!pageUnloading){ if(wasMember) refreshMembership('peer removed'); updatePeerList(); log('t-sys',`peer removed ↔ ${remoteId} (${reason})`); }

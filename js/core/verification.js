@@ -77,13 +77,25 @@ function runAudit(command){
     if(result.disposition===RULE_DISPOSITION.DEFER&&Number.isFinite(result.retryMs)){
         setTimeout(()=>{
             const live=pendingById.get(command.commandId);
-            if(live&&!live.verdict&&validatorsFor(command).includes(myId)) runAudit(command);
+            // Remote audit retry must not fall back to the same stale client-side policy cache
+            // that the initial server-bound audit deliberately bypassed.
+            if(live&&!live.verdict&&(live.remote||validatorsFor(command).includes(myId))) runAudit(command);
         },Math.max(TEMPORAL_RETRY_MIN_MS,result.retryMs));
     }else if(result.disposition===RULE_DISPOSITION.RESYNC){
         requestPeerResync(command.playerId,`audit:${result.code}`);
     }else if(result.disposition===RULE_DISPOSITION.FAULT){
         reportProtocolFault(command,result.code,result.reason,{remote:command.playerId!==myId});
     }
+}
+
+
+function applyVerificationProgress(progress){
+    if(!progress||progress.signalProtocol!==SIGNAL_PROTOCOL||typeof progress.commandId!=='string') return;
+    const pending=pendingById.get(progress.commandId);
+    if(!pending||pending.command.playerId!==myId) return;
+    const received=Number.isSafeInteger(progress.received)?progress.received:0;
+    const quorum=Number.isSafeInteger(progress.quorum)?progress.quorum:0;
+    log('t-audit',`AUDIT_PROGRESS id=${progress.commandId} validator=${progress.validatorId||'-'} decision=${progress.decision||'-'} code=${progress.resultCode||'-'} votes=${received}/${quorum} evidence=${progress.evidenceHash||'-'} computed=${progress.computedHash||'-'}`);
 }
 
 function applyVerificationCertificate(certificate){

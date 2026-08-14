@@ -472,8 +472,10 @@ function sendSnapshot(remoteId,{bootstrap=false}={}){
         log('t-err',`BOOTSTRAP_HISTORY_BUILD_FAILED peer=${remoteId}: ${error.message}`);
         return false;
     }
+    const abilityCheckpoint=abilityCheckpointFor(myId);
     const snapshot={
         protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,clockTick:currentTick(),eventSequence:confirmedEventSeq.get(myId)||0,
+        abilityCheckpoint,
         state:{...state,deadObservedAt:0},stateHash:stateHash(state),historyTail,bootstrap:Boolean(bootstrap)
     };
     const message={kind:'snapshot',snapshot};
@@ -484,7 +486,7 @@ function sendSnapshot(remoteId,{bootstrap=false}={}){
         if(sent){
             bootstrapSentPeers.add(remoteId);
             bootstrapPendingSince.set(remoteId,performance.now());
-            log('t-sys',`${AUTO_MODE?'AUTO_':''}BOOTSTRAP_SENT peer=${remoteId} seq=${state.sequence}/e${snapshot.eventSequence}`);
+            log('t-sys',`${AUTO_MODE?'AUTO_':''}BOOTSTRAP_SENT peer=${remoteId} seq=${state.sequence}/e${snapshot.eventSequence}/a${abilityCheckpoint.confirmedAbilitySeq||0}`);
         }
         return sent;
     }
@@ -502,7 +504,10 @@ function retryPendingBootstraps(){
     if(pageUnloading||!roomReady) return;
     const now=performance.now();
     for(const remoteId of directOpenPeerIds()){
-        if(bootstrapAckPeers.has(remoteId)) continue;
+        // DataChannel/WebSocket transports are reliable and ordered. Once the bootstrap write
+        // succeeds, ACK is telemetry only; retrying the same snapshot until ACK used to repeatedly
+        // reconcile/defer live event streams and could starve quorum progress.
+        if(bootstrapSentPeers.has(remoteId)) continue;
         const last=bootstrapPendingSince.get(remoteId)||0;
         if(now-last>=500) sendSnapshot(remoteId,{bootstrap:true});
     }
@@ -513,23 +518,28 @@ function receiveSnapshotAck(remoteId,ack){
     if(!ack||ack.protocol!==PROTOCOL||ack.rulesetRevision!==RULESET_REVISION||ack.senderId!==remoteId||ack.ownerId!==myId) return;
     if(!Number.isSafeInteger(ack.sequence)||ack.sequence<0) return;
     const eventSequence=Number.isSafeInteger(ack.eventSequence)&&ack.eventSequence>=0?ack.eventSequence:0;
+    const abilitySequence=Number.isSafeInteger(ack.abilitySequence)&&ack.abilitySequence>=0?ack.abilitySequence:0;
     const prev=bootstrapAckState.get(remoteId);
-    if(!prev || ack.sequence>prev.sequence || (ack.sequence===prev.sequence&&eventSequence>prev.eventSequence)){
-        bootstrapAckState.set(remoteId,{sequence:ack.sequence,eventSequence});
+    if(!prev || ack.sequence>prev.sequence || (ack.sequence===prev.sequence&&(eventSequence>prev.eventSequence||abilitySequence>(prev.abilitySequence||0)))){
+        bootstrapAckState.set(remoteId,{sequence:ack.sequence,eventSequence,abilitySequence});
     }
     bootstrapAckPeers.add(remoteId);
     bootstrapPendingSince.delete(remoteId);
-    log('t-sys',`${AUTO_MODE?'AUTO_':''}BOOTSTRAP_ACK peer=${remoteId} seq=${ack.sequence}/e${eventSequence}`);
+    log('t-sys',`${AUTO_MODE?'AUTO_':''}BOOTSTRAP_ACK peer=${remoteId} seq=${ack.sequence}/e${eventSequence}/a${abilitySequence}`);
 }
 function sendInstalledBootstrapAck(remoteId){
     const installed=confirmedWorld[remoteId];
     if(!installed||!isPeerOpen(remoteId)) return false;
-    return sendWireNow(remoteId,{kind:'snapshotAck',ack:{
+    const ack={
         protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,ownerId:remoteId,
         sequence:confirmedSeq.get(remoteId)||installed.sequence||0,
         eventSequence:confirmedEventSeq.get(remoteId)||0,
+        abilitySequence:confirmedAbilitySeq.get(remoteId)||0,
         stateHash:stateHash(installed)
-    }});
+    };
+    const sent=sendWireNow(remoteId,{kind:'snapshotAck',ack});
+    if(sent&&AUTO_DEBUG) log('t-sys',`BOOTSTRAP_ACK_TX peer=${remoteId} seq=${ack.sequence}/e${ack.eventSequence}/a${ack.abilitySequence}`);
+    return sent;
 }
 function receiveSnapshot(remoteId,snapshot){
     if(!snapshot||snapshot.protocol!==PROTOCOL||snapshot.rulesetRevision!==RULESET_REVISION||snapshot.senderId!==remoteId||!snapshot.state) return;
@@ -537,6 +547,7 @@ function receiveSnapshot(remoteId,snapshot){
     const state=snapshot.state;
     if(![state.x,state.y].every(Number.isFinite)||!Number.isSafeInteger(state.sequence)||!Number.isSafeInteger(state.lifeId)||!Number.isSafeInteger(state.hp)) return;
     const historyImported=importHistoricalStates(remoteId,snapshot.historyTail);
+    const abilityImported=importAbilityCheckpoint(remoteId,snapshot.abilityCheckpoint);
     const localSeq=confirmedSeq.get(remoteId)||0;
     if(state.sequence<localSeq){
         if(historyImported) acceptDeferred(remoteId,'event');
@@ -552,12 +563,12 @@ function receiveSnapshot(remoteId,snapshot){
     const now=performance.now();
     tickAnchors.set(remoteId,{remoteTick:Number.isSafeInteger(snapshot.clockTick)?snapshot.clockTick:normalized.tick,localTime:now});
     activityAnchors.set(remoteId,{lastMoveAt:now,lastDamageAt:now,lastHealAt:now});
-    log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence}/e${confirmedEventSeq.get(remoteId)||0} alive=${normalized.alive} history=${historyImported}`);
+    log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence}/e${confirmedEventSeq.get(remoteId)||0}/a${confirmedAbilitySeq.get(remoteId)||0} alive=${normalized.alive} history=${historyImported} abilityRefs=${abilityImported}`);
     if(snapshot.bootstrap){
         // ACK only after a base state is installed. A later stale bootstrap retry is ACKed
         // with the newer installed prefix above, so ACK loss can never deadlock command flow.
         sendInstalledBootstrapAck(remoteId);
-        log('t-sys',`${AUTO_MODE?'AUTO_':''}BOOTSTRAP_RX peer=${remoteId} seq=${normalized.sequence}/e${confirmedEventSeq.get(remoteId)||0}`);
+        log('t-sys',`${AUTO_MODE?'AUTO_':''}BOOTSTRAP_RX peer=${remoteId} seq=${normalized.sequence}/e${confirmedEventSeq.get(remoteId)||0}/a${confirmedAbilitySeq.get(remoteId)||0}`);
     }
     if(AUTO_MODE) setTimeout(tickAutoMode,0);
     acceptDeferred(remoteId,'simulation');

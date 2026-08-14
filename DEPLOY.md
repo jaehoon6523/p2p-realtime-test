@@ -15,7 +15,7 @@
 Expected startup log:
 
 ```text
-[p2p-arena-signaling] protocol=5 ruleset=pssf-v13-r26 base<=5 sim<=16 listening ws://0.0.0.0:<PORT>
+[p2p-arena-signaling] protocol=5 ruleset=pssf-v13-r27 base<=5 sim<=16 listening ws://0.0.0.0:<PORT>
 ```
 
 ## GitHub Pages
@@ -35,10 +35,10 @@ https://jaehoon6523.github.io/p2p-realtime-test/p2p-mmo-demo-hardened.html?signa
 
 ## Browser asset version pin
 
-- Expected build/ruleset: `pssf-v13-r26`
-- Demo HTML script URLs are pinned with `?v=pssf-v13-r26`.
-- Public test URLs should include `&build=pssf-v13-r26` so the HTML document itself also gets a distinct cache key.
-- After deploy, reject any browser log whose `local peer boot` line is not `ruleset=pssf-v13-r26`.
+- Expected build/ruleset: `pssf-v13-r27`
+- Demo HTML script URLs are pinned with `?v=pssf-v13-r27`.
+- Public test URLs should include `&build=pssf-v13-r27` so the HTML document itself also gets a distinct cache key.
+- After deploy, reject any browser log whose `local peer boot` line is not `ruleset=pssf-v13-r27`.
 
 
-After deployment, verify the first boot line reports `ruleset=pssf-v13-r26`. For multiplayer diagnostics, AUTO pages with `autodebug=1` should show `AUDIT_EVAL` and `AUDIT_RECEIPT_TX` when receiving Q/W/E.
+After deployment, verify the first boot line reports `ruleset=pssf-v13-r27`. For multiplayer diagnostics, AUTO pages with `autodebug=1` should show `AUDIT_EVAL` and `AUDIT_RECEIPT_TX` when receiving Q/W/E.
