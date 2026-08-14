@@ -77,7 +77,7 @@ function makeMoveCommand(dx,dy){
 function buildShootCheckpoint(shooter){
     const checkpoint=[];
     const world=Object.create(null);
-    const interestRadius=Math.max(AOI_RADIUS,MAX_RANGE+HIT_RADIUS+24);
+    const interestRadius=Math.max(AOI_RADIUS,MAX_COMBAT_RANGE+HIT_RADIUS+24);
     for(const id of [myId,...directOpenPeerIds()]){
         const state=id===myId?shooter:confirmedWorld[id];
         if(!state) continue;
@@ -91,18 +91,60 @@ function buildShootCheckpoint(shooter){
     return {checkpoint,world};
 }
 
-function makeShootCommand(dirX,dirY){
+function pendingShootCount(playerId){
+    return (pendingEventOrderByPlayer.get(playerId)||[]).reduce((count,id)=>count+(pendingById.get(id)?.command?.type==='shoot'?1:0),0);
+}
+function suppressShoot(code,detail=''){
+    log('warn',`SHOOT_SUPPRESSED code=${code}${detail?` ${detail}`:''}`);
+    return null;
+}
+
+function abilityRefFromCommand(command){
+    if(!command?.abilitySeq) return null;
+    return {
+        abilitySeq:command.abilitySeq,
+        abilityId:command.abilityId,
+        castStartTick:command.castStartTick,
+        releaseTick:command.tick,
+        abilityHash:abilityEvidenceHash(command),
+    };
+}
+function nextAbilityContext(ability,castStartTick){
+    const abilitySeq=++localAbilitySequence;
+    return {
+        abilitySeq,
+        castStartTick,
+        previousAbilityRef:lastLocalAbilityRef?{...lastLocalAbilityRef}:null,
+        previousSameAbilityRef:lastLocalAbilityRefById.get(ability.id)?{...lastLocalAbilityRefById.get(ability.id)}:null,
+    };
+}
+function registerLocalAbilityIssued(command){
+    const ref=abilityRefFromCommand(command);
+    if(!ref) return;
+    lastLocalAbilityRef=ref;
+    lastLocalAbilityRefById.set(command.abilityId,ref);
+}
+
+function makeShootCommand(dirX,dirY,abilityId='basic_attack',castStartTick=currentTick()){
+    const ability=ABILITY_BY_ID[abilityId];
+    if(!ability||ability.kind!=='shoot') return suppressShoot('ABILITY_UNKNOWN',`ability=${abilityId}`);
     const shooter=getPredictedTail(myId);
-    if(!shooter||!shooter.alive||hasPendingType(myId,'shoot')) return null;
+    if(!shooter) return suppressShoot('NO_LOCAL_STATE');
+    if(!shooter.alive) return suppressShoot('DEAD',`life=${shooter.lifeId}`);
+    const unresolved=pendingShootCount(myId);
+    if(unresolved>=MAX_PENDING_SHOOTS) return suppressShoot('EVENT_BACKPRESSURE',`pendingShoot=${unresolved}/${MAX_PENDING_SHOOTS}`);
     const length=Math.hypot(dirX,dirY);
-    if(!Number.isFinite(length)||length<1e-9) return null;
+    if(!Number.isFinite(length)||length<1e-9) return suppressShoot('INVALID_AIM');
     const aimX=round6(dirX/length),aimY=round6(dirY/length);
     const data=buildShootCheckpoint(shooter);
+    const abilityContext=nextAbilityContext(ability,castStartTick);
     const command=makeEventBaseCommand('shoot');
-    if(!command) return null;
-    const hitId=rayHit(shooter.x,shooter.y,aimX,aimY,data.world,myId);
-    return {
+    if(!command){ localAbilitySequence--; return suppressShoot('EVENT_BACKPRESSURE',`pendingEvent=${(pendingEventOrderByPlayer.get(myId)||[]).length}/${MAX_LOCAL_EVENT_PENDING}`); }
+    const hitId=rayHit(shooter.x,shooter.y,aimX,aimY,data.world,myId,ability.range);
+    const result={
         ...command,
+        abilityId:ability.id,
+        ...abilityContext,
         simulationRef:{sequence:shooter.sequence,stateHash:simulationRefHash(shooter)},
         aimX,aimY,
         checkpoint:data.checkpoint,
@@ -110,6 +152,26 @@ function makeShootCommand(dirX,dirY){
         claimedHitId:hitId,
         claimedHitLifeId:hitId?data.world[hitId].lifeId:null,
     };
+    registerLocalAbilityIssued(result);
+    return result;
+}
+
+function makeDashCommand(dirX,dirY,castStartTick=currentTick()){
+    const ability=ABILITY_DEFINITIONS.E;
+    const prev=getPredictedTail(myId);
+    if(!prev||!prev.alive) return null;
+    const length=Math.hypot(dirX,dirY);
+    if(!Number.isFinite(length)||length<1e-9) return null;
+    const nx=dirX/length,ny=dirY/length;
+    const desired=clampWorldPoint(prev.x+nx*ability.distance,prev.y+ny*ability.distance);
+    const dx=round6(desired.x-prev.x),dy=round6(desired.y-prev.y);
+    if(Math.hypot(dx,dy)<1e-9) return null;
+    const abilityContext=nextAbilityContext(ability,castStartTick);
+    const command=makeSimulationBaseCommand('dash',prev);
+    if(!command){ localAbilitySequence--; return null; }
+    const result={...command,abilityId:ability.id,...abilityContext,dx,dy,claimedX:round6(desired.x),claimedY:round6(desired.y)};
+    registerLocalAbilityIssued(result);
+    return result;
 }
 
 function makeHealCommand(){

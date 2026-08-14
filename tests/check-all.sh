@@ -5,4 +5,6 @@ while IFS= read -r -d '' f; do node --check "$f" >/dev/null; done < <(find "$ROO
 node --check "$ROOT/mmo-server/signaling-server.js" >/dev/null
 node "$ROOT/tests/layout-check.js"
 node "$ROOT/tests/smoke-vm.js"
+node "$ROOT/tests/server-qc-vm.js"
+node "$ROOT/tests/optimistic-contract.js"
 echo 'PSSF all checks: PASS'

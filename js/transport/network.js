@@ -50,6 +50,7 @@ function handleWireMessage(remoteId,raw){
     else if(message.kind==='neighborDigest') receiveNeighborDigest(remoteId,message.digest);
     else if(message.kind==='botTelegraph') receiveBotTelegraph(remoteId,message.telegraph);
     else if(message.kind==='resyncRequest') receiveResyncRequest(remoteId,message.request);
+    else if(message.kind==='rebaseRequired') receiveRebaseRequired(remoteId,message.request);
     else invalidCounter++;
 }
 

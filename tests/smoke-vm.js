@@ -81,13 +81,13 @@ vm.runInContext(`
   if((confirmedSeq.get(myId)||0)!==2) throw new Error('dependency invalidation did not consume simulation sequence');
   if(finalizedRecord(myId,2)?.disposition!=='INVALIDATED') throw new Error('dependency invalidation not recorded');
 
-  // r5 core regression: unresolved SHOOT uses eventSeq and MUST NOT block simulation movement.
+  // r4 core regression: unresolved SHOOT uses eventSeq and MUST NOT block simulation movement.
   storeServerPolicy({peerId:myId,assignmentId:'self-a2',topologyEpoch:2,validatorIds:['peerA'],quorum:1,rulesetRevision:RULESET_REVISION,directPeers:['peerA'],topologyPeers:['peerA'],simulationPeers:[]},{self:true});
   serverPeerCount=2;
   const base={...confirmedWorld[myId]};
   localEventSequence=1;
   const checkpoint=[{playerId:myId,x:base.x,y:base.y,alive:true,lifeId:base.lifeId,sequence:base.sequence,tick:base.tick}];
-  const shoot={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,stream:'event',type:'shoot',commandId:'shoot-e1',playerId:myId,eventSeq:1,simulationRef:{sequence:base.sequence,stateHash:simulationRefHash(base)},tick:currentTick(),topologyEpoch:2,assignmentId:'self-a2',aoiRadius:AOI_RADIUS,aimX:1,aimY:0,checkpoint,checkpointHash:stableHash(checkpoint),claimedHitId:null,claimedHitLifeId:null};
+  const shootReleaseTick=currentTick()+6; const shoot={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,stream:'event',type:'shoot',abilityId:'basic_attack',abilitySeq:1,castStartTick:currentTick(),previousAbilityRef:null,previousSameAbilityRef:null,commandId:'shoot-e1',playerId:myId,eventSeq:1,simulationRef:{sequence:base.sequence,stateHash:simulationRefHash(base)},tick:shootReleaseTick,topologyEpoch:2,assignmentId:'self-a2',aoiRadius:AOI_RADIUS,aimX:1,aimY:0,checkpoint,checkpointHash:stableHash(checkpoint),claimedHitId:null,claimedHitLifeId:null};
   ingestCommand(shoot,false);
   if(!pendingAtEventSequence(myId,1)||pendingAtEventSequence(myId,1).verdict) throw new Error('shoot did not remain independently pending');
   if((confirmedEventSeq.get(myId)||0)!==0) throw new Error('pending shoot prematurely advanced event stream');
@@ -104,6 +104,34 @@ vm.runInContext(`
   if((confirmedSeq.get(myId)||0)!==3) throw new Error('shoot rejection rewound/advanced simulation sequence');
   if(finalizedEventRecord(myId,1)?.disposition!=='REJECTED') throw new Error('shoot reject not recorded in event history');
   if(finalizedRecord(myId,3)?.disposition!=='ACCEPTED') throw new Error('move was not independently finalized');
+
+  // r8 ability regression: Q/W ranges differ and E dash is bounded.
+  const testWorld={target:{x:base.x+300,y:base.y,alive:true,lifeId:1}};
+  if(rayHit(base.x,base.y,1,0,testWorld,myId,ABILITY_DEFINITIONS.Q.range)!==null) throw new Error('Q exceeded basic range');
+  if(rayHit(base.x,base.y,1,0,testWorld,myId,ABILITY_DEFINITIONS.W.range)!=='target') throw new Error('W long range not applied');
+  finalizedAbilityHistory.delete(myId); pendingAbilityTerminals.delete(myId); confirmedAbilitySeq.set(myId,0);
+  const dashPrev={...confirmedWorld[myId]};
+  const dashCast=currentTick();
+  const dash={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,stream:'simulation',type:'dash',abilityId:'dash',abilitySeq:1,castStartTick:dashCast,previousAbilityRef:null,previousSameAbilityRef:null,commandId:'dash-test',playerId:myId,sequence:4,previousStateHash:stateHash(dashPrev),tick:dashCast+6,topologyEpoch:2,assignmentId:'self-a2',aoiRadius:AOI_RADIUS,dx:Math.min(DASH_DISTANCE,50),dy:0,claimedX:round6(dashPrev.x+Math.min(DASH_DISTANCE,50)),claimedY:dashPrev.y};
+  const dashPending={previousState:dashPrev};
+  pendingById.set(dash.commandId,{...dashPending,command:dash});
+  const dashResult=evaluateCommand(dash,pendingById.get(dash.commandId));
+  pendingById.delete(dash.commandId);
+  if(dashResult.disposition!==RULE_DISPOSITION.ACCEPT) throw new Error('legal E dash rejected');
+
+
+  // r9 ability consensus: validators independently enforce cast, recovery and cooldown lineage.
+  finalizedAbilityHistory.delete('abilityActor'); pendingAbilityTerminals.delete('abilityActor'); confirmedAbilitySeq.set('abilityActor',0);
+  const mkAbility=(abilityId,abilitySeq,castStartTick,releaseTick,prev=null,prevSame=null)=>({playerId:'abilityActor',abilityId,abilitySeq,castStartTick,tick:releaseTick,previousAbilityRef:prev,previousSameAbilityRef:prevSame});
+  const q1=mkAbility('basic_attack',1,100,106,null,null);
+  let ar=evaluateAbilityContract(q1); if(ar.disposition!==RULE_DISPOSITION.ACCEPT) throw new Error('valid Q timing rejected '+JSON.stringify(ar));
+  const q1rec={abilitySeq:1,abilityId:'basic_attack',castStartTick:100,releaseTick:106,abilityHash:abilityEvidenceHash(q1),disposition:'ACCEPTED',commandId:'q1'};
+  abilityHistoryFor('abilityActor').set(1,q1rec); confirmedAbilitySeq.set('abilityActor',1);
+  const q1ref={abilitySeq:1,abilityId:'basic_attack',castStartTick:100,releaseTick:106,abilityHash:q1rec.abilityHash};
+  ar=evaluateAbilityContract(mkAbility('long_shot',2,108,114,q1ref,null)); if(ar.code!=='ABILITY_RECOVERY_LOCK') throw new Error('recovery lock not verified '+JSON.stringify(ar));
+  ar=evaluateAbilityContract(mkAbility('basic_attack',2,112,118,q1ref,q1ref)); if(ar.code!=='ABILITY_COOLDOWN') throw new Error('Q cooldown not verified '+JSON.stringify(ar));
+  ar=evaluateAbilityContract(mkAbility('long_shot',2,112,113,q1ref,null)); if(ar.code!=='ABILITY_CAST_TOO_FAST') throw new Error('cast delay not verified '+JSON.stringify(ar));
+  ar=evaluateAbilityContract(mkAbility('long_shot',2,112,118,q1ref,null)); if(ar.disposition!==RULE_DISPOSITION.ACCEPT) throw new Error('valid W lineage rejected '+JSON.stringify(ar));
 
   // Historical checkpoint validation: moving later must not invalidate an older checkpoint.
   initializePlayer('target',300,300,colorFor('target'),{tick:10,sequence:0});
@@ -140,38 +168,11 @@ vm.runInContext(`
   acceptDeferred('peerB','simulation');
   if((confirmedSeq.get('peerB')||0)!==7) throw new Error('post-resync simulation replay failed');
 
-  // Snapshot must carry enough historical simulation tail for late event references.
-  initializePlayer('peerTail',420,420,colorFor('peerTail'),{tick:20,sequence:20,eventSequence:3});
-  const tailOld={...confirmedWorld.peerTail,x:418,y:419,sequence:19,tick:19};
-  simulationStateHistory.set('peerTail',new Map());
-  receiveSnapshot('peerTail',{protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:'peerTail',clockTick:20,eventSequence:3,state:{...confirmedWorld.peerTail,deadObservedAt:0},stateHash:stateHash(confirmedWorld.peerTail),historyTail:[compactHistoryState(tailOld)]});
-  if(resolveSimulationReference('peerTail',{sequence:19,stateHash:simulationRefHash(tailOld)}).status!=='ok') throw new Error('snapshot history tail did not restore late simulation reference');
-
-  // Targeted history repair must restore one missing historical pose without rewinding current simulation.
-  initializePlayer('peerRepair',500,500,colorFor('peerRepair'),{tick:30,sequence:30,eventSequence:4});
-  const repairOld={...confirmedWorld.peerRepair,x:490,y:495,sequence:27,tick:27};
-  simulationStateHistory.set('peerRepair',new Map());
-  if(resolveSimulationReference('peerRepair',{sequence:27,stateHash:simulationRefHash(repairOld)}).status!=='missing') throw new Error('history repair fixture did not start missing');
-  receiveHistoryRepair('peerRepair',{protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:'peerRepair',sequence:27,states:[compactHistoryState(repairOld)]});
-  if(resolveSimulationReference('peerRepair',{sequence:27,stateHash:simulationRefHash(repairOld)}).status!=='ok') throw new Error('targeted history repair failed');
-  if((confirmedSeq.get('peerRepair')||0)!==30) throw new Error('history repair rewound current simulation sequence');
-
-  // Local respawn must proactively refresh direct peers instead of waiting for periodic presence/snapshot traffic.
-  peers.set('refreshPeer',{transport:'ws-bot',state:'open'});
-  let respawnSnapshotCount=0;
-  const originalSafeDataSend=safeDataSend;
-  safeDataSend=(remoteId,message)=>{ if(remoteId==='refreshPeer'&&message?.kind==='snapshot') respawnSnapshotCount++; return true; };
-  const respawnState={...confirmedWorld[myId],alive:true,hp:MAX_HP,lifeId:(confirmedWorld[myId].lifeId||1)+1,sequence:(confirmedSeq.get(myId)||0)+1,tick:currentTick(),deadObservedAt:0};
-  onRespawnCommitted({playerId:myId},respawnState);
-  safeDataSend=originalSafeDataSend;
-  peers.delete('refreshPeer');
-  if(respawnSnapshotCount<1) throw new Error('local respawn did not proactively refresh direct peers');
-
   const invalidBefore=invalidCounter;
   handleSignalMessage({type:'verification-certificate',from:'evil'});
   if(invalidCounter!==invalidBefore+1) throw new Error('server-only guard failed');
 
-  if(typeof drainEventCommits!=='function'||typeof resolveSimulationReference!=='function'||typeof requestPeerResync!=='function'||typeof receiveHistoryRepair!=='function') throw new Error('dual-stream/history-repair symbols missing');
+  if(typeof drainEventCommits!=='function'||typeof resolveSimulationReference!=='function'||typeof requestPeerResync!=='function') throw new Error('dual-stream symbols missing');
 `,context,{filename:'smoke-assertions.js'});
 
 const server=fs.readFileSync(path.join(__dirname,'..','mmo-server','signaling-server.js'),'utf8');

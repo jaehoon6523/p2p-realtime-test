@@ -3,7 +3,7 @@
 function draw(){
     beginWorldFrame(); const now=performance.now();
     const localRender=getRenderPosition(myId); if(localRender){ context.beginPath(); context.arc(localRender.x,localRender.y,AOI_RADIUS,0,Math.PI*2); context.strokeStyle='rgba(61,220,151,.32)'; context.lineWidth=1.5; context.setLineDash([6,6]); context.stroke(); context.setLineDash([]); }
-    for(let i=bullets.length-1;i>=0;i--){ const bullet=bullets[i],age=now-bullet.born; if(age>BULLET_TRAIL_MS){ bullets.splice(i,1); continue; } context.globalAlpha=1-age/BULLET_TRAIL_MS; context.strokeStyle=bullet.color; context.lineWidth=1.5; context.beginPath(); context.moveTo(bullet.x1,bullet.y1); context.lineTo(bullet.x2,bullet.y2); context.stroke(); context.globalAlpha=1; }
+    for(let i=bullets.length-1;i>=0;i--){ const bullet=bullets[i],age=now-bullet.born; if(now>(bullet.expiresAt||bullet.born+BULLET_TRAIL_MS)){ bullets.splice(i,1); optimisticEffects.delete(bullet.commandId); continue; } const life=Math.max(1,(bullet.expiresAt||bullet.born+BULLET_TRAIL_MS)-bullet.born); context.globalAlpha=Math.max(.12,1-age/life)*(bullet.status==='rejected'?.45:1); context.strokeStyle=bullet.color; context.lineWidth=bullet.status==='tentative'?1.5:bullet.status==='confirmed'?2:1; if(bullet.status==='tentative') context.setLineDash([4,3]); context.beginPath(); context.moveTo(bullet.x1,bullet.y1); context.lineTo(bullet.x2,bullet.y2); context.stroke(); context.setLineDash([]); context.globalAlpha=1; }
     // Server-side bot prefire hint. Purely visual: shot authority still comes from the normal shoot command.
     for(const [botId,t] of [...botTelegraphs]){
         if(t.expiresAt<=now){ botTelegraphs.delete(botId); continue; }

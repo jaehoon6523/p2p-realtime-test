@@ -50,7 +50,32 @@ function onRespawnCommitted(command,state){
     }
 }
 
-function spawnBullet(command,shooterState=null){ const origin=shooterState||resolveSimulationReference(command.playerId,command.simulationRef)?.state; if(!origin) return; bullets.push({x1:origin.x,y1:origin.y,x2:origin.x+command.aimX*MAX_RANGE,y2:origin.y+command.aimY*MAX_RANGE,born:performance.now(),color:visibleWorld[command.playerId]?.color||'#fff'}); }
+function spawnBullet(command,shooterState=null){
+    const origin=shooterState||resolveSimulationReference(command.playerId,command.simulationRef)?.state;
+    if(!origin) return;
+    const range=ABILITY_BY_ID[command.abilityId]?.range||MAX_RANGE;
+    const born=performance.now();
+    const bullet={commandId:command.commandId,abilityId:command.abilityId,x1:origin.x,y1:origin.y,x2:origin.x+command.aimX*range,y2:origin.y+command.aimY*range,born,status:'tentative',expiresAt:born+BULLET_TRAIL_MS,color:visibleWorld[command.playerId]?.color||'#fff'};
+    bullets.push(bullet);
+    optimisticEffects.set(command.commandId,{kind:'shoot',status:'tentative',createdAt:born,abilityId:command.abilityId});
+    log('t-cmd',`PREDICT_APPLY kind=shoot id=${command.commandId} ability=${command.abilityId} refSim=${command.simulationRef?.sequence??'-'}`);
+}
+function confirmOptimisticEffect(command){
+    const effect=optimisticEffects.get(command.commandId);
+    if(effect){ effect.status='confirmed'; effect.confirmedAt=performance.now(); }
+    for(const bullet of bullets) if(bullet.commandId===command.commandId){ bullet.status='confirmed'; bullet.expiresAt=Math.max(bullet.expiresAt,performance.now()+Math.min(OPTIMISTIC_CONFIRM_FADE_MS,80)); }
+    if(command.type==='shoot') log('t-audit',`PREDICT_CONFIRM kind=shoot id=${command.commandId}`);
+    else if(command.type==='dash') log('t-audit',`PREDICT_CONFIRM kind=dash id=${command.commandId}`);
+}
+function rejectOptimisticEffect(command,reason='REJECTED'){
+    const now=performance.now();
+    const effect=optimisticEffects.get(command.commandId);
+    if(effect){ effect.status='rejected'; effect.rejectedAt=now; effect.reason=reason; }
+    for(const bullet of bullets) if(bullet.commandId===command.commandId){ bullet.status='rejected'; bullet.rejectedAt=now; bullet.expiresAt=Math.min(bullet.expiresAt,now+OPTIMISTIC_REJECT_FADE_MS); }
+    if(command.type==='shoot') log('t-warn',`PREDICT_CORRECT kind=shoot id=${command.commandId} action=fade reason=${reason}`);
+    else if(command.type==='dash') log('t-warn',`PREDICT_CORRECT kind=dash id=${command.commandId} action=canonical-snap reason=${reason}`);
+}
+
 function buildMoveProfile(distance,startSpeed){
     const d=Math.max(0,distance);
     const v0=Math.max(0,startSpeed);
@@ -326,6 +351,7 @@ function receiveSnapshot(remoteId,snapshot){
     reconcileEventStreamFromSnapshot(remoteId,state.sequence,snapshotEventSequence);
     const normalized={...state,color:state.color||colorFor(remoteId),hp:Math.max(0,Math.min(MAX_HP,state.hp)),alive:Boolean(state.alive),deadObservedAt:state.alive?0:performance.now(),tentative:false};
     confirmedWorld[remoteId]=normalized; visibleWorld[remoteId]={...normalized}; confirmedSeq.set(remoteId,normalized.sequence); confirmedEventSeq.set(remoteId,Math.max(confirmedEventSeq.get(remoteId)||0,snapshotEventSequence)); rememberSimulationState(remoteId,normalized);
+    noteAppliedPrefixRepair(remoteId);
     queueRemoteRenderTarget(remoteId,normalized,{snap:true});
     const now=performance.now();
     tickAnchors.set(remoteId,{remoteTick:Number.isSafeInteger(snapshot.clockTick)?snapshot.clockTick:normalized.tick,localTime:now});

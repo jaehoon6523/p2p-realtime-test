@@ -2,7 +2,7 @@
 
 function validateEnvelope(remoteId,command){
     if(!command||command.protocol!==PROTOCOL||command.rulesetRevision!==RULESET_REVISION) return {ok:false,code:'PROTOCOL_RULESET',reason:'unsupported protocol/ruleset',fault:true};
-    if(!['move','shoot','heal','respawn'].includes(command.type)) return {ok:false,code:'COMMAND_TYPE',reason:'unsupported command',fault:true};
+    if(!['move','dash','shoot','heal','respawn'].includes(command.type)) return {ok:false,code:'COMMAND_TYPE',reason:'unsupported command',fault:true};
     const expectedStream=command.type==='shoot'?'event':'simulation';
     if(command.stream!==expectedStream) return {ok:false,code:'STREAM_TYPE',reason:`command type ${command.type} must use ${expectedStream} stream`,fault:true};
     if(command.playerId!==remoteId) return {ok:false,code:'IDENTITY_MISMATCH',reason:`identity mismatch channel=${remoteId} payload=${command.playerId}`,fault:true};
@@ -19,8 +19,16 @@ function validateEnvelope(remoteId,command){
         if(!command.simulationRef||!Number.isSafeInteger(command.simulationRef.sequence)||command.simulationRef.sequence<0||typeof command.simulationRef.stateHash!=='string') return {ok:false,code:'SIMULATION_REF',reason:'invalid simulation reference',fault:true};
     }
 
-    if(command.type==='move'&&![command.dx,command.dy,command.claimedX,command.claimedY].every(Number.isFinite)) return {ok:false,code:'MOVE_SHAPE',reason:'invalid move values',fault:true};
-    if(command.type==='shoot'&&(![command.aimX,command.aimY].every(Number.isFinite)||!Array.isArray(command.checkpoint)||command.checkpoint.length>64)) return {ok:false,code:'SHOOT_SHAPE',reason:'invalid shoot values',fault:true};
+    if(command.type==='shoot'||command.type==='dash'){
+        const ability=ABILITY_BY_ID[command.abilityId];
+        if(!ability||!Number.isSafeInteger(command.abilitySeq)||command.abilitySeq<1||!Number.isSafeInteger(command.castStartTick)||command.castStartTick<0||command.castStartTick>command.tick) return {ok:false,code:'ABILITY_SHAPE',reason:'invalid ability lineage/timing',fault:true};
+        const validRef=ref=>ref==null||(Number.isSafeInteger(ref.abilitySeq)&&ref.abilitySeq>0&&typeof ref.abilityId==='string'&&Number.isSafeInteger(ref.castStartTick)&&Number.isSafeInteger(ref.releaseTick)&&typeof ref.abilityHash==='string');
+        if(!validRef(command.previousAbilityRef)||!validRef(command.previousSameAbilityRef)) return {ok:false,code:'ABILITY_REF_SHAPE',reason:'invalid ability reference',fault:true};
+    }
+
+    if((command.type==='move'||command.type==='dash')&&![command.dx,command.dy,command.claimedX,command.claimedY].every(Number.isFinite)) return {ok:false,code:'MOVE_SHAPE',reason:'invalid move values',fault:true};
+    if(command.type==='dash'&&(command.abilityId!=='dash')) return {ok:false,code:'DASH_SHAPE',reason:'invalid dash ability',fault:true};
+    if(command.type==='shoot'&&(!ABILITY_BY_ID[command.abilityId]||ABILITY_BY_ID[command.abilityId].kind!=='shoot'||![command.aimX,command.aimY].every(Number.isFinite)||!Array.isArray(command.checkpoint)||command.checkpoint.length>64)) return {ok:false,code:'SHOOT_SHAPE',reason:'invalid shoot values',fault:true};
     if(command.type==='heal'&&!Number.isSafeInteger(command.claimedHp)) return {ok:false,code:'HEAL_SHAPE',reason:'invalid heal value',fault:true};
     if(command.type==='respawn'&&(!Number.isFinite(command.spawnX)||!Number.isFinite(command.spawnY)||!Number.isSafeInteger(command.nextLifeId))) return {ok:false,code:'RESPAWN_SHAPE',reason:'invalid respawn values',fault:true};
     return {ok:true};
@@ -28,7 +36,7 @@ function validateEnvelope(remoteId,command){
 
 function verificationRequired(commandOrType){
     const type=typeof commandOrType==='string'?commandOrType:commandOrType?.type;
-    return type==='shoot'||type==='heal'||type==='respawn';
+    return type==='shoot'||type==='dash'||type==='heal'||type==='respawn';
 }
 
 function rememberCommandId(command){
@@ -190,7 +198,11 @@ function ingestCommand(command,remote,{reentry=false}={}){
                 return;
             }
             deferCommand(command,remote,'STATE_HASH_MISMATCH',`previous state hash mismatch seq=${command.sequence}`);
-            if(remote) requestPeerResync(command.playerId,'state-hash-mismatch');
+            if(remote){
+                const repair=notePrefixMismatch(command.playerId,command.sequence);
+                if(repair.failures>=PREFIX_REPAIR_REPEAT_THRESHOLD) sendRebaseRequired(command.playerId,command.sequence);
+                else requestPeerResync(command.playerId,'state-hash-mismatch');
+            }
             return;
         }
     }
@@ -198,6 +210,7 @@ function ingestCommand(command,remote,{reentry=false}={}){
     const pending=addPending(command,remote,{previousState:previous});
     if(!pending) return;
     if(command.type==='shoot') spawnBullet(command,previous);
+    if(command.type==='dash'&&command.playerId===myId){ optimisticEffects.set(command.commandId,{kind:'dash',status:'tentative',createdAt:performance.now(),from:{x:previous.x,y:previous.y},to:{x:pending.nextState.x,y:pending.nextState.y}}); log('t-cmd',`PREDICT_APPLY kind=dash id=${command.commandId} from=${previous.x.toFixed(2)},${previous.y.toFixed(2)} to=${pending.nextState.x.toFixed(2)},${pending.nextState.y.toFixed(2)}`); }
 
     const orphan=orphanCertificates.get(command.commandId);
     if(orphan){ orphanCertificates.delete(command.commandId); applyVerificationCertificate(orphan); }
@@ -232,7 +245,7 @@ function ingestCommand(command,remote,{reentry=false}={}){
         return;
     }
 
-    log('t-cmd',`${command.type} tentative id=${command.commandId} ${commandSequenceText(command)}${command.type==='shoot'?` refSim=${command.simulationRef.sequence}`:''} validators=${validators.join(',')} quorum=${quorum}`);
+    log('t-cmd',`${command.type} tentative id=${command.commandId} ${commandSequenceText(command)}${command.type==='shoot'?` ability=${command.abilityId} refSim=${command.simulationRef.sequence}`:command.type==='dash'?` ability=${command.abilityId}`:''} validators=${validators.join(',')} quorum=${quorum}`);
     if(validators.includes(myId)) runAudit(command);
     pending.timeoutId=setTimeout(()=>{
         const live=pendingById.get(command.commandId);
@@ -265,7 +278,7 @@ function commitCommand(command,pending){
     const beforeHash=stateHash(current);
     let state={...pending.nextState,tentative:false};
 
-    if(command.type==='move'){
+    if(command.type==='move'||command.type==='dash'){
         state={...state,hp:current.hp,alive:current.alive,lifeId:current.lifeId,deadObservedAt:current.deadObservedAt,deadServerAt:Number(current.deadServerAt)||0};
     }else if(command.type==='heal'){
         state={...state,hp:current.alive?Math.min(MAX_HP,current.hp+1):current.hp,alive:current.alive,lifeId:current.lifeId,deadObservedAt:current.deadObservedAt,deadServerAt:Number(current.deadServerAt)||0};
@@ -287,6 +300,8 @@ function commitCommand(command,pending){
     commitLatencySamples.push(latency);
     if(commitLatencySamples.length>COMMIT_LATENCY_SAMPLES) commitLatencySamples.shift();
     if(command.type==='respawn') onRespawnCommitted(command,state);
+    if(command.type==='dash'&&command.playerId===myId) confirmOptimisticEffect(command);
+    if(command.abilityId) queueAbilityTerminal(command,FINAL_DISPOSITION.ACCEPTED);
     recordFinalizedEvent(command,FINAL_DISPOSITION.ACCEPTED,'accepted',{beforeHash,afterHash:stateHash(state),code:'ACCEPTED'});
     log('t-audit',`CONFIRMED seq=${command.sequence} type=${command.type} id=${command.commandId}`);
 }
@@ -300,7 +315,9 @@ function finalizeRejectedCommand(command,pending){
     rememberSimulationState(command.playerId,state);
     removePending(command);
     rejectedCounter++;
+    if(command.abilityId) queueAbilityTerminal(command,pending.rejectCode==='DEPENDENCY_INVALIDATED'?FINAL_DISPOSITION.INVALIDATED:FINAL_DISPOSITION.REJECTED);
     recordFinalizedEvent(command,pending.rejectCode==='DEPENDENCY_INVALIDATED'?FINAL_DISPOSITION.INVALIDATED:FINAL_DISPOSITION.REJECTED,pending.rejectReason||'rejected',{beforeHash,afterHash:stateHash(state),code:pending.rejectCode});
+    if(command.type==='dash'&&command.playerId===myId) rejectOptimisticEffect(command,pending.rejectCode||'REJECTED');
     log('t-warn',`REJECTED-NOOP seq=${command.sequence} id=${command.commandId} code=${pending.rejectCode||'REJECTED'} reason=${pending.rejectReason||'-'}`);
     reconcilePendingDependencies(command.playerId);
 }
@@ -326,7 +343,9 @@ function finalizeAcceptedEvent(command,pending){
     const latency=Math.max(0,performance.now()-pending.receivedAt);
     commitLatencySamples.push(latency);
     if(commitLatencySamples.length>COMMIT_LATENCY_SAMPLES) commitLatencySamples.shift();
+    if(command.type==='shoot') confirmOptimisticEffect(command);
     if(command.type==='shoot'&&command.claimedHitId) registerConfirmedHit(command,pending.certificateServerTime);
+    if(command.abilityId) queueAbilityTerminal(command,FINAL_DISPOSITION.ACCEPTED);
     recordFinalizedEvent(command,FINAL_DISPOSITION.ACCEPTED,'accepted',{beforeHash,afterHash:beforeHash,code:'ACCEPTED'});
     log('t-audit',`CONFIRMED eventSeq=${command.eventSeq} type=${command.type} refSim=${command.simulationRef?.sequence??'-'} id=${command.commandId}`);
 }
@@ -337,6 +356,8 @@ function finalizeRejectedEvent(command,pending){
     confirmedEventSeq.set(command.playerId,command.eventSeq);
     removePending(command);
     rejectedCounter++;
+    if(command.type==='shoot') rejectOptimisticEffect(command,pending.rejectCode||'REJECTED');
+    if(command.abilityId) queueAbilityTerminal(command,FINAL_DISPOSITION.REJECTED);
     recordFinalizedEvent(command,FINAL_DISPOSITION.REJECTED,pending.rejectReason||'rejected',{beforeHash,afterHash:beforeHash,code:pending.rejectCode});
     log('t-warn',`REJECTED-EVENT-NOOP eventSeq=${command.eventSeq} id=${command.commandId} code=${pending.rejectCode||'REJECTED'} reason=${pending.rejectReason||'-'}`);
 }

@@ -18,6 +18,178 @@ const FINAL_DISPOSITION = Object.freeze({
 
 const lastResyncRequestAt = new Map();
 
+const PREFIX_REPAIR_REPEAT_THRESHOLD = 2;
+
+function prefixRepairSignature(playerId){
+    const state=confirmedWorld[playerId];
+    if(!state) return null;
+    return `${state.sequence}:${stateHash(state)}:e${confirmedEventSeq.get(playerId)||0}`;
+}
+
+function noteAppliedPrefixRepair(playerId){
+    const signature=prefixRepairSignature(playerId);
+    if(!signature) return;
+    const previous=prefixRepairState.get(playerId)||{};
+    prefixRepairState.set(playerId,{...previous,signature,appliedAt:performance.now()});
+}
+
+function notePrefixMismatch(playerId,conflictSequence){
+    const signature=prefixRepairSignature(playerId);
+    const previous=prefixRepairState.get(playerId)||{};
+    const repeated=previous.signature===signature&&previous.conflictSequence===conflictSequence;
+    const failures=repeated?(previous.failures||0)+1:1;
+    const next={...previous,signature,conflictSequence,failures,lastMismatchAt:performance.now()};
+    prefixRepairState.set(playerId,next);
+    return next;
+}
+
+function sendRebaseRequired(playerId,conflictSequence){
+    if(!playerId||playerId===myId||!isPeerOpen(playerId)) return false;
+    const state=confirmedWorld[playerId];
+    if(!state) return false;
+    const key=`${playerId}:${state.sequence}:${stateHash(state)}:${conflictSequence}`;
+    const now=performance.now();
+    if(now-(rebaseRequestState.get(key)||0)<1500) return false;
+    rebaseRequestState.set(key,now);
+    safeDataSend(playerId,{kind:'rebaseRequired',request:{
+        protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,requesterId:myId,playerId,
+        canonicalSequence:state.sequence,canonicalStateHash:stateHash(state),
+        canonicalEventSequence:confirmedEventSeq.get(playerId)||0,
+        conflictSequence,reason:'repeated-prefix-conflict'
+    }});
+    log('t-warn',`PREFIX_CONFLICT player=${playerId} canonical=${state.sequence} conflict=${conflictSequence}; REBASE_REQUIRED sent`);
+    return true;
+}
+
+function collectLocalSimulationSuffix(afterSequence){
+    const bySeq=new Map();
+    for(const id of pendingOrderByPlayer.get(myId)||[]){
+        const pending=pendingById.get(id);
+        if(pending?.command?.sequence>afterSequence) bySeq.set(pending.command.sequence,pending.command);
+    }
+    for(const item of deferredCommands.values()){
+        if(item.command.playerId===myId&&commandStream(item.command)==='simulation'&&item.command.sequence>afterSequence) bySeq.set(item.command.sequence,item.command);
+    }
+    return [...bySeq.values()].sort((a,b)=>a.sequence-b.sequence);
+}
+
+function applyLocalRebaseRequired(remoteId,request){
+    if(!request||request.protocol!==PROTOCOL||request.rulesetRevision!==RULESET_REVISION||request.requesterId!==remoteId||request.playerId!==myId) return false;
+    const base=confirmedWorld[myId];
+    if(!base||request.canonicalSequence!==base.sequence||request.canonicalStateHash!==stateHash(base)) return false;
+    const voteKey=`vote:${base.sequence}:${stateHash(base)}:${request.conflictSequence}`;
+    const voteRecord=rebaseRequestState.get(voteKey)||{voters:new Set(),createdAt:performance.now()};
+    voteRecord.voters.add(remoteId); rebaseRequestState.set(voteKey,voteRecord);
+    const required=Math.min(2,Math.max(1,directOpenPeerIds().length));
+    if(voteRecord.voters.size<required){
+        log('t-sys',`REBASE_REQUIRED vote requester=${remoteId} canonical=${base.sequence} conflict=${request.conflictSequence} votes=${voteRecord.voters.size}/${required}`);
+        return false;
+    }
+    rebaseRequestState.delete(voteKey);
+    const suffix=collectLocalSimulationSuffix(base.sequence);
+    if(!suffix.length) return false;
+    let state={...base,tentative:false};
+    let expected=base.sequence+1,consumed=0;
+    for(const command of suffix){
+        if(command.sequence<expected) continue;
+        if(command.sequence!==expected) break;
+        const pending=pendingById.get(command.commandId);
+        if(pending) clearTimeout(pending.timeoutId);
+        removePending(command);
+        clearDeferredCommand(command.commandId);
+        const beforeHash=stateHash(state);
+        state={...state,sequence:command.sequence,tentative:false};
+        confirmedWorld[myId]=state;
+        confirmedSeq.set(myId,command.sequence);
+        rememberSimulationState(myId,state);
+        recordFinalizedEvent(command,FINAL_DISPOSITION.INVALIDATED,'canonical prefix rebase consumed malformed speculative suffix',{beforeHash,afterHash:stateHash(state),code:'PREFIX_REBASE_INVALIDATED'});
+        rejectedCounter++; consumed++; expected++;
+        log('t-warn',`INVALIDATED-NOOP seq=${command.sequence} id=${command.commandId} code=PREFIX_REBASE_INVALIDATED`);
+    }
+    if(!consumed) return false;
+    pendingOrderByPlayer.set(myId,(pendingOrderByPlayer.get(myId)||[]).filter(id=>pendingById.has(id)));
+    visibleWorld[myId]={...state};
+    localSequence=Math.max(localSequence,state.sequence);
+    delete moveState[myId];
+    queueLocalRenderTarget(state);
+    for(const peerId of directOpenPeerIds()) sendSnapshot(peerId);
+    sendPresence();
+    for(const peerId of directOpenPeerIds()) sendNeighborDigest(peerId);
+    log('t-warn',`REBASE_APPLIED requester=${remoteId} canonical=${base.sequence} consumed=${consumed} now=${state.sequence}`);
+    return true;
+}
+
+function receiveRebaseRequired(remoteId,request){
+    applyLocalRebaseRequired(remoteId,request);
+}
+
+function abilityEvidencePayload(command){
+    if(!command?.abilityId||!Number.isSafeInteger(command.abilitySeq)) return null;
+    return {
+        playerId:command.playerId,
+        abilitySeq:command.abilitySeq,
+        abilityId:command.abilityId,
+        castStartTick:command.castStartTick,
+        releaseTick:command.tick,
+        previousAbilityRef:command.previousAbilityRef||null,
+        previousSameAbilityRef:command.previousSameAbilityRef||null,
+    };
+}
+function abilityEvidenceHash(command){ return stableHash(abilityEvidencePayload(command)); }
+function abilityHistoryFor(playerId){
+    let history=finalizedAbilityHistory.get(playerId);
+    if(!history){ history=new Map(); finalizedAbilityHistory.set(playerId,history); }
+    return history;
+}
+function abilityTerminalQueueFor(playerId){
+    let queue=pendingAbilityTerminals.get(playerId);
+    if(!queue){ queue=new Map(); pendingAbilityTerminals.set(playerId,queue); }
+    return queue;
+}
+function finalizedAbilityRecord(playerId,abilitySeq){ return finalizedAbilityHistory.get(playerId)?.get(abilitySeq)||null; }
+function previousSameAbilityRecord(playerId,abilityId,beforeAbilitySeq){
+    const history=finalizedAbilityHistory.get(playerId);
+    if(!history) return null;
+    for(let seq=beforeAbilitySeq-1;seq>=1;seq--){
+        const record=history.get(seq);
+        if(record?.abilityId===abilityId) return record;
+    }
+    return null;
+}
+function abilityRefMatchesRecord(ref,record){
+    if(!ref&&!record) return true;
+    if(!ref||!record) return false;
+    return ref.abilitySeq===record.abilitySeq&&ref.abilityId===record.abilityId&&ref.castStartTick===record.castStartTick&&ref.releaseTick===record.releaseTick&&ref.abilityHash===record.abilityHash;
+}
+function queueAbilityTerminal(command,disposition){
+    if(!command?.abilityId||!Number.isSafeInteger(command.abilitySeq)) return;
+    abilityTerminalQueueFor(command.playerId).set(command.abilitySeq,{command,disposition});
+    drainAbilityTerminals(command.playerId);
+}
+function drainAbilityTerminals(playerId){
+    const queue=abilityTerminalQueueFor(playerId),history=abilityHistoryFor(playerId);
+    while(true){
+        const expected=(confirmedAbilitySeq.get(playerId)||0)+1;
+        const terminal=queue.get(expected);
+        if(!terminal) break;
+        queue.delete(expected);
+        const command=terminal.command;
+        const record={
+            abilitySeq:command.abilitySeq,
+            abilityId:command.abilityId,
+            castStartTick:command.castStartTick,
+            releaseTick:command.tick,
+            abilityHash:abilityEvidenceHash(command),
+            disposition:terminal.disposition,
+            commandId:command.commandId,
+        };
+        history.set(expected,record);
+        confirmedAbilitySeq.set(playerId,expected);
+        while(history.size>FINALIZED_HISTORY_LIMIT){ const oldest=history.keys().next().value; history.delete(oldest); }
+        log('t-audit',`ABILITY_FINALIZED player=${playerId} abilitySeq=${expected} ability=${command.abilityId} disposition=${terminal.disposition}`);
+    }
+}
+
 function commandFingerprint(command){
     // TODO(Security): replace the 32-bit demo hash with SHA-256/BLAKE3 + actor authentication.
     return stableHash(command);

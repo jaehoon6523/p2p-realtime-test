@@ -43,3 +43,24 @@
 - history repair 수신은 historical cache만 채우며 current confirmed sequence를 rewind하지 않는다.
 - respawn commit 직후 local peer는 direct peers에 snapshot을 즉시 broadcast하고 signaling presence를 즉시 갱신한다.
 - 목적은 reconnect/topology churn/respawn 이후 늦게 도착한 SHOOT이 과거 `simulationRef`를 잃어버리는 liveness failure를 막는 것이다.
+
+
+## r6 prefix convergence
+- Repeated identical snapshot repair followed by the same `STATE_HASH_MISMATCH` escalates to `PREFIX_CONFLICT` instead of looping forever.
+- `REBASE_REQUIRED` is peer-issued in this demo and therefore is a liveness mechanism, not a cryptographically authoritative finality proof. The actor only accepts it when the requested canonical sequence/hash exactly matches its own confirmed prefix; with 2+ direct peers, two distinct peers must request the same rebase before it is applied.
+- The actor consumes its already-issued contiguous speculative simulation suffix as `PREFIX_REBASE_INVALIDATED` no-ops. Sequence numbers are never deleted or reused.
+
+
+## r7 shoot pipeline
+
+- SHOOT event는 최대 4개 unresolved까지 허용한다. 그 이상은 `EVENT_BACKPRESSURE`로 명시적으로 억제/로그한다.
+- 입력 억제와 validator의 `SHOOT_INVALID`는 다른 개념이다.
+- heal/respawn은 여전히 simulation stream이라 movement head-of-line blocking 가능성이 남아 있다.
+
+- Ability cooldown/cast/recovery definitions are hard-coded in `ABILITY_DEFINITIONS`; XML Ability/Component loading is TODO. Validator-side cross-command cooldown proof is not yet a signed/anchored contract, so local cooldown enforcement is UX/runtime policy rather than final anti-cheat evidence.
+
+## r10 optimistic correction
+
+- Q/W projectile trails and local E pose are optimistic UX only. HP/death/kill remain certificate-gated.
+- Dash correction currently reconciles through the existing canonical simulation rebuild/rebase path; there is no bespoke animation blend yet.
+- Projectile correction fades the speculative trail rather than reconstructing a physically bounced/blocked cosmetic projectile.

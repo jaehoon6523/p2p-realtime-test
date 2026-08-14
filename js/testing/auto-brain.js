@@ -9,6 +9,8 @@ const autoBrain = {
     targetId:null,
     nextRetargetAt:0,
     nextFireAt:0,
+    nextLongShotAt:0,
+    nextDashAt:0,
     nextWanderAt:0,
     strafeSign:Math.random()<.5?-1:1,
     wanderX:null,
@@ -35,7 +37,7 @@ function autoChooseTarget(){
     const candidates=autoCandidates();
     const current=candidates.find(item=>item.id===autoBrain.targetId);
     // 히스테리시스: 현재 타깃이 너무 멀어지지 않았다면 유지해 불필요한 떨림을 줄인다.
-    if(current && current.distance <= Math.max(AOI_RADIUS, MAX_RANGE*1.7)) return current;
+    if(current && current.distance <= Math.max(AOI_RADIUS, MAX_COMBAT_RANGE*1.15)) return current;
     const next=candidates[0]||null;
     autoBrain.targetId=next?.id||null;
     return next;
@@ -84,13 +86,13 @@ function autoMoveAround(target,now){
 function autoShoot(target,now){
     if(!target || now<autoBrain.nextFireAt) return;
     const me=getPredictedTail(myId);
-    if(!me?.alive || hasPendingType(myId,'shoot')) return;
+    if(!me?.alive) return;
 
     const tr=getRenderPosition(target.id)||target.render||target.state;
     if(!tr) return;
     const dx=tr.x-me.x, dy=tr.y-me.y;
     const distance=Math.hypot(dx,dy);
-    if(distance<1 || distance>MAX_RANGE-4) return;
+    if(distance<1 || distance>MAX_COMBAT_RANGE-4) return;
 
     autoBrain.nextFireAt=now+AUTO_FIRE_MS*(.78+Math.random()*.44);
     flushActiveMoveToNow(now);
@@ -102,7 +104,15 @@ function autoShoot(target,now){
     const aimY=tr.y+(Math.random()-.5)*7;
     const adx=aimX-shooter.x, ady=aimY-shooter.y;
     const len=Math.hypot(adx,ady)||1;
-    executeLocal(makeShootCommand(adx/len,ady/len));
+    const useW=distance>MAX_RANGE*.9 && now>=autoBrain.nextLongShotAt && Math.random()<.45;
+    const ability=useW?ABILITY_DEFINITIONS.W:ABILITY_DEFINITIONS.Q;
+    if(distance>ability.range-4) return;
+    if(useW) autoBrain.nextLongShotAt=now+ABILITY_DEFINITIONS.W.cooldownMs;
+    setTimeout(()=>{ const cmd=makeShootCommand(adx/len,ady/len,ability.id); if(cmd) executeLocal(cmd); },ability.castMs);
+    if(distance<75&&now>=autoBrain.nextDashAt&&Math.random()<.25){
+        autoBrain.nextDashAt=now+ABILITY_DEFINITIONS.E.cooldownMs;
+        setTimeout(()=>{ const cmd=makeDashCommand(-adx/len,-ady/len); if(cmd) executeLocal(cmd); },ABILITY_DEFINITIONS.E.castMs);
+    }
 }
 
 function tickAutoMode(){

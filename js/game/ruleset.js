@@ -63,9 +63,48 @@ function predictNextState(previous,command){
         const result=computeMove(previous,command.dx,command.dy,command.tick);
         return {...previous,x:result.x,y:result.y,tick:command.tick,sequence:command.sequence,tentative:true};
     }
+    if(command.type==='dash') return {...previous,x:command.claimedX,y:command.claimedY,tick:command.tick,sequence:command.sequence,tentative:true};
     if(command.type==='heal') return {...previous,hp:Math.min(MAX_HP,previous.hp+1),tick:command.tick,sequence:command.sequence,tentative:true};
     if(command.type==='respawn') return {...previous,x:command.spawnX,y:command.spawnY,hp:MAX_HP,alive:true,lifeId:command.nextLifeId,tick:command.tick,sequence:command.sequence,deadObservedAt:0,tentative:true};
     return {...previous,tick:command.tick,sequence:command.sequence,tentative:true};
+}
+
+function evaluateAbilityContract(command){
+    const ability=ABILITY_BY_ID[command.abilityId];
+    if(!ability) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_UNKNOWN',reason:`unknown ability ${command.abilityId}`,computed:null,advanceTick:false};
+    const timing=abilityTimingFor(ability);
+    const castTicks=command.tick-command.castStartTick;
+    if(castTicks<Math.max(1,timing.castTicks-1)) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_CAST_TOO_FAST',reason:`cast ticks=${castTicks} required~${timing.castTicks}`,computed:{castTicks,timing},advanceTick:false};
+    if(castTicks>timing.castTicks+6) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_CAST_TOO_LATE',reason:`cast ticks=${castTicks} expected~${timing.castTicks}`,computed:{castTicks,timing},advanceTick:false};
+
+    const known=confirmedAbilitySeq.get(command.playerId)||0;
+    if(command.abilitySeq>known+1) return {disposition:RULE_DISPOSITION.DEFER,code:'ABILITY_LINEAGE_PENDING',reason:`waiting abilitySeq=${known+1} before ${command.abilitySeq}`,retryMs:Math.max(TEMPORAL_RETRY_MIN_MS,60),computed:{known},advanceTick:false};
+    if(command.abilitySeq<=known){
+        const existing=finalizedAbilityRecord(command.playerId,command.abilitySeq);
+        const same=existing&&existing.abilityHash===abilityEvidenceHash(command);
+        return same
+            ? {disposition:RULE_DISPOSITION.ACCEPT,code:'ABILITY_ALREADY_FINALIZED',reason:'ability lineage already finalized identically',computed:{abilitySeq:command.abilitySeq},advanceTick:false}
+            : {disposition:RULE_DISPOSITION.FAULT,code:'ABILITY_EQUIVOCATION',reason:`abilitySeq ${command.abilitySeq} conflicts with finalized lineage`,computed:{abilitySeq:command.abilitySeq},advanceTick:false};
+    }
+
+    const previous=command.abilitySeq===1?null:finalizedAbilityRecord(command.playerId,command.abilitySeq-1);
+    if(command.abilitySeq>1&&!previous) return {disposition:RULE_DISPOSITION.DEFER,code:'ABILITY_PREVIOUS_PENDING',reason:`waiting previous abilitySeq=${command.abilitySeq-1}`,retryMs:60,computed:null,advanceTick:false};
+    if(!abilityRefMatchesRecord(command.previousAbilityRef,previous)) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_PREVIOUS_REF_MISMATCH',reason:'previous ability reference mismatch',computed:null,advanceTick:false};
+
+    if(previous){
+        const previousAbility=ABILITY_BY_ID[previous.abilityId];
+        const recoveryTicks=abilityTimingFor(previousAbility).recoveryTicks;
+        const gap=command.castStartTick-previous.releaseTick;
+        if(gap<Math.max(1,recoveryTicks-1)) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_RECOVERY_LOCK',reason:`recovery gap=${gap} required~${recoveryTicks}`,computed:{gap,recoveryTicks},advanceTick:false};
+    }
+
+    const previousSame=previousSameAbilityRecord(command.playerId,command.abilityId,command.abilitySeq);
+    if(!abilityRefMatchesRecord(command.previousSameAbilityRef,previousSame)) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_COOLDOWN_REF_MISMATCH',reason:'same-ability cooldown reference mismatch',computed:null,advanceTick:false};
+    if(previousSame){
+        const gap=command.castStartTick-previousSame.castStartTick;
+        if(gap<Math.max(1,timing.cooldownTicks-1)) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_COOLDOWN',reason:`cooldown gap=${gap} required~${timing.cooldownTicks}`,computed:{gap,cooldownTicks:timing.cooldownTicks},advanceTick:false};
+    }
+    return {disposition:RULE_DISPOSITION.ACCEPT,code:'ABILITY_VALID',reason:'ability timing and lineage verified',computed:{abilitySeq:command.abilitySeq,abilityId:command.abilityId,castTicks,timing},advanceTick:false};
 }
 
 function evaluateCommand(command,pendingOverride=null){
@@ -88,18 +127,33 @@ function evaluateCommand(command,pendingOverride=null){
             : {disposition:RULE_DISPOSITION.REJECT,code:'MOVE_INVALID',reason:`move invalid distance=${result.distance} max=${result.maxStep}`,computed:result,advanceTick:true};
     }
 
+    if(command.type==='dash'){
+        const abilityCheck=evaluateAbilityContract(command);
+        if(abilityCheck.disposition!==RULE_DISPOSITION.ACCEPT) return abilityCheck;
+        const ability=ABILITY_BY_ID[command.abilityId];
+        const distance=Math.hypot(command.dx,command.dy);
+        const point=clampWorldPoint(previous.x+command.dx,previous.y+command.dy);
+        const accepted=previous.alive&&ability?.kind==='dash'&&distance<=ability.distance+0.01&&point.x===command.claimedX&&point.y===command.claimedY&&inBounds(point.x,point.y);
+        return accepted
+            ? {disposition:RULE_DISPOSITION.ACCEPT,code:'DASH_VALID',reason:'dash verified',computed:{x:point.x,y:point.y,distance,ability:abilityCheck.computed},advanceTick:true}
+            : {disposition:RULE_DISPOSITION.REJECT,code:'DASH_INVALID',reason:`dash invalid distance=${distance.toFixed(2)}`,computed:{x:point.x,y:point.y,distance,ability:abilityCheck.computed},advanceTick:true};
+    }
+
     if(command.type==='shoot'){
+        const abilityCheck=evaluateAbilityContract(command);
+        if(abilityCheck.disposition!==RULE_DISPOSITION.ACCEPT) return abilityCheck;
+        const ability=ABILITY_BY_ID[command.abilityId];
         const length=Math.hypot(command.aimX,command.aimY);
         const refMatches=command.simulationRef?.sequence===previous.sequence&&command.simulationRef?.stateHash===simulationRefHash(previous);
         const checkpointOk=stableHash(command.checkpoint)===command.checkpointHash&&checkpointMatchesLocal(command.checkpoint,command.playerId,previous,command.simulationRef);
         const world=Object.create(null);
         for(const item of command.checkpoint) world[item.playerId]=item;
-        const hit=rayHit(previous.x,previous.y,command.aimX,command.aimY,world,command.playerId);
+        const hit=rayHit(previous.x,previous.y,command.aimX,command.aimY,world,command.playerId,ability?.range||0);
         const life=hit?world[hit]?.lifeId:null;
-        const accepted=previous.alive&&Math.abs(length-1)<0.02&&refMatches&&checkpointOk&&hit===command.claimedHitId&&life===command.claimedHitLifeId;
+        const accepted=previous.alive&&ability?.kind==='shoot'&&Math.abs(length-1)<0.02&&refMatches&&checkpointOk&&hit===command.claimedHitId&&life===command.claimedHitLifeId;
         return accepted
-            ? {disposition:RULE_DISPOSITION.ACCEPT,code:'SHOOT_VALID',reason:'shoot verified against historical simulation reference',computed:{hit,life,simulationRef:command.simulationRef},advanceTick:false}
-            : {disposition:RULE_DISPOSITION.REJECT,code:'SHOOT_INVALID',reason:`shoot invalid hit=${hit||'none'} checkpoint=${checkpointOk} ref=${refMatches}`,computed:{hit,life,simulationRef:command.simulationRef},advanceTick:false};
+            ? {disposition:RULE_DISPOSITION.ACCEPT,code:'SHOOT_VALID',reason:'shoot verified against historical simulation reference',computed:{hit,life,simulationRef:command.simulationRef,ability:abilityCheck.computed},advanceTick:false}
+            : {disposition:RULE_DISPOSITION.REJECT,code:'SHOOT_INVALID',reason:`shoot invalid hit=${hit||'none'} checkpoint=${checkpointOk} ref=${refMatches}`,computed:{hit,life,simulationRef:command.simulationRef,ability:abilityCheck.computed},advanceTick:false};
     }
 
     if(command.type==='heal'){
@@ -149,12 +203,12 @@ function checkpointMatchesLocal(checkpoint,shooterId,shooterState,simulationRef=
     return shooterSeen;
 }
 
-function rayHit(originX,originY,dirX,dirY,world,excludeId){
+function rayHit(originX,originY,dirX,dirY,world,excludeId,maxRange=MAX_RANGE){
     let closest=null,closestProjection=Infinity;
     for(const [id,state] of Object.entries(world)){
         if(id===excludeId||!state||!state.alive) continue;
         const px=state.x-originX,py=state.y-originY,projection=px*dirX+py*dirY;
-        if(projection<0||projection>MAX_RANGE) continue;
+        if(projection<0||projection>maxRange) continue;
         const cx=originX+dirX*projection,cy=originY+dirY*projection;
         if(Math.hypot(state.x-cx,state.y-cy)<=HIT_RADIUS&&projection<closestProjection){ closest=id; closestProjection=projection; }
     }

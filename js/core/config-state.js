@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r5';
+const RULESET_REVISION = 'pssf-v13-r10';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
@@ -49,12 +49,25 @@ const TEMPORAL_DEFER_MAX_MS = 1600;
 const TEMPORAL_RETRY_MIN_MS = 40;
 const MAX_DEFERRED_PER_PLAYER = 256;
 const MAX_LOCAL_PENDING = 32;
-const MAX_LOCAL_EVENT_PENDING = 4;
+const MAX_LOCAL_EVENT_PENDING = 6;
+const MAX_PENDING_SHOOTS = 4;
+const OPTIMISTIC_REJECT_FADE_MS = 90;
+const OPTIMISTIC_CONFIRM_FADE_MS = 160; // visual-only prediction; shared HP/death remains certificate-gated
+
+// Ability runtime contract. TODO: load the same fields from XML Ability/Component definitions.
+const ABILITY_DEFINITIONS = Object.freeze({
+    Q:Object.freeze({id:'basic_attack',key:'Q',kind:'shoot',cooldownMs:500,castMs:200,recoveryMs:200,range:230}),
+    W:Object.freeze({id:'long_shot',key:'W',kind:'shoot',cooldownMs:2000,castMs:200,recoveryMs:200,range:460}),
+    E:Object.freeze({id:'dash',key:'E',kind:'dash',cooldownMs:3000,castMs:200,recoveryMs:200,distance:150}),
+});
+const ABILITY_BY_ID = Object.freeze(Object.fromEntries(Object.values(ABILITY_DEFINITIONS).map(v=>[v.id,v])));
+function abilityTicks(ms){ return Math.max(1,Math.round(ms/TICK_MS)); }
+function abilityTimingFor(ability){ return {cooldownTicks:abilityTicks(ability.cooldownMs),castTicks:abilityTicks(ability.castMs),recoveryTicks:abilityTicks(ability.recoveryMs)}; }
+const MAX_COMBAT_RANGE = Math.max(...Object.values(ABILITY_DEFINITIONS).filter(v=>v.kind==='shoot').map(v=>v.range));
+const DASH_DISTANCE = ABILITY_DEFINITIONS.E.distance;
 const SIMULATION_HISTORY_LIMIT = 512;
-const SNAPSHOT_HISTORY_TAIL_SEQUENCES = 96;
-const HISTORY_REPAIR_MAX_STATES = 16;
 const FINALIZED_HISTORY_LIMIT = 512;
-const MAX_RANGE = 230; // combat ruleset은 AOI 설정과 독립
+const MAX_RANGE = ABILITY_DEFINITIONS.Q.range; // legacy/basic attack range alias
 const HIT_RADIUS = 14;
 const MAX_HP = 3;
 const RESPAWN_MS = 5000;
@@ -129,7 +142,8 @@ const localRenderState={fromX:null,fromY:null,toX:null,toY:null,startedAt:0,dura
 const remoteRenderState = Object.create(null); // remote authoritative interpolation only
 const relayWorld = new Map(); // discovery-only 1.5-hop summaries; never authoritative
 const seenRelayRecords = new Map();
-const bullets = [];
+const bullets = []; // optimistic projectile trails; never authoritative damage
+const optimisticEffects = new Map(); // commandId -> {kind,status,createdAt,...}; UX/correction only
 const botTelegraphs = new Map(); // optional server-bot prefire hints; never gameplay authority
 const hitFlashes = Object.create(null);
 const pendingById = new Map();
@@ -156,6 +170,16 @@ const networkMetrics = {
 };
 
 let membershipRevision = 0;
+const localAbilityReadyAt = new Map();
+let localAbilityLockUntil = 0;
+let localAbilitySequence = 0;
+let lastLocalAbilityRef = null;
+const lastLocalAbilityRefById = new Map();
+const finalizedAbilityHistory = new Map(); // playerId -> Map(abilitySeq -> terminal ability record)
+const pendingAbilityTerminals = new Map(); // playerId -> Map(abilitySeq -> terminal awaiting earlier abilitySeq)
+const confirmedAbilitySeq = new Map();
+let lastAimWorld = {x:WORLD_WIDTH/2,y:WORLD_HEIGHT/2};
+
 let localSequence = 0; // simulation stream
 let localEventSequence = 0; // consequential event stream
 let confirmedCounter = 0;
