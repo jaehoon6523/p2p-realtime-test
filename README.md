@@ -1,5 +1,5 @@
 
-- r22: Q/W shooting no longer flushes or cancels click-movement; dash replaces click-movement. Direct-mesh health is now DataChannel-open based, not RTCPeerConnection.connected based.
+- r23: click-movement keeps a continuous `vx/vy` velocity vector across retargets; direction changes obey acceleration/deceleration limits instead of rotating scalar speed instantly. Direct-mesh recovery treats DataChannel-open as transport readiness and accepts a fresh offer to replace a half-open WebRTC edge.
 # p2p-realtime-test
 
 ## 바로가기
@@ -35,7 +35,7 @@ p2p-realtime-test/
 
 - game protocol: **13**
 - signaling protocol: **5**
-- ruleset: **pssf-v13-r22**
+- ruleset: **pssf-v13-r23**
 - server-assigned actor policy: `assignmentId / topologyEpoch / validatorIds / quorum`
 - simulation stream (`move/heal/respawn`): actor state sequence + deterministic dependency chain
 - shoot event stream: independent `eventSeq` + `simulationRef(sequence,stateHash)` + aim vector

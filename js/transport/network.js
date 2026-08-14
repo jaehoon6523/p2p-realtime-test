@@ -166,7 +166,7 @@ async function handleSignalMessage(message){
     if(!roomReady||message.from===myId||typeof message.from!=='string'||(message.to&&message.to!==myId)) return;
     try{
         if(message.type==='offer') await createPeer(message.from,false,message.sdp);
-        else if(message.type==='answer'){ const peer=peers.get(message.from); if(peer?.pc){ await peer.pc.setRemoteDescription(message.sdp); await flushIce(peer); } }
+        else if(message.type==='answer'){ const peer=peers.get(message.from); if(peer?.pc&&peer.pc.signalingState==='have-local-offer'){ await peer.pc.setRemoteDescription(message.sdp); await flushIce(peer); } }
         else if(message.type==='ice'){
             const peer=peers.get(message.from); if(peer?.pc){ if(peer.pc.remoteDescription) await peer.pc.addIceCandidate(message.candidate); else peer.pendingIce.push(message.candidate); }
             else{ const list=prePeerIce.get(message.from)||[]; list.push(message.candidate); prePeerIce.set(message.from,list); }
@@ -260,7 +260,17 @@ async function flushIce(peer){
     for(const candidate of queued) try{ await peer.pc.addIceCandidate(candidate); }catch(error){ log('t-err',`ICE rejected peer=${peer.remoteId}: ${error.message}`); }
 }
 async function createPeer(remoteId,isOfferer,remoteSdp){
-    const existing=peers.get(remoteId); if(existing?.pc&&!['closed','failed'].includes(existing.pc.connectionState)) return;
+    let existing=peers.get(remoteId);
+    if(existing?.pc&&!['closed','failed'].includes(existing.pc.connectionState)){
+        if(isPeerOpen(remoteId)) return existing;
+        if(isOfferer) return existing;
+        // A fresh deterministic offer must be allowed to heal a half-open edge. The old code
+        // returned merely because ICE/DTLS said connected, leaving a missing DataChannel forever.
+        signalLog('t-sig',`DIRECT_OFFER_REPLACE peer=${remoteId} pc=${existing.pc.connectionState} dc=${existing.dc?.readyState||'missing'}`);
+        const carriedIce=[...(existing.pendingIce||[])];
+        removePeer(remoteId,'incoming offer replaces non-open edge');
+        existing={pendingIce:carriedIce};
+    }
     const pc=new RTCPeerConnection(STUN); const entry={transport:'webrtc',pc,dc:null,state:'connecting',remoteId,pendingIce:[...(existing?.pendingIce||[]),...(prePeerIce.get(remoteId)||[])],connectStartedAt:performance.now()}; prePeerIce.delete(remoteId); peers.set(remoteId,entry);
     pc.onicecandidate=event=>{ if(event.candidate) sendSignal({type:'ice',to:remoteId,candidate:event.candidate}); };
     pc.onconnectionstatechange=()=>{

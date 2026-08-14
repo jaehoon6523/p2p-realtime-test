@@ -76,68 +76,81 @@ function rejectOptimisticEffect(command,reason='REJECTED'){
     else if(command.type==='dash') log('t-warn',`PREDICT_CORRECT kind=dash id=${command.commandId} action=canonical-snap reason=${reason}`);
 }
 
-function buildMoveProfile(distance,startSpeed){
-    const d=Math.max(0,distance);
-    const v0=Math.max(0,startSpeed);
-    if(d<=1e-6) return {startSpeed:v0,peakSpeed:0,accelTime:0,cruiseTime:0,decelTime:0,accelDistance:0,cruiseDistance:0,totalTime:0,startsDecelerating:true};
-
-    // A retarget begins at the currently rendered speed. Speed cannot drop at the retarget instant.
-    // Deceleration starts only when the remaining distance is at or below the braking distance.
-    const brakeDistance=v0*v0/(2*MOVE_DECEL);
-    if(d<=brakeDistance+1e-6){
-        const decel=Math.max(MOVE_DECEL,v0*v0/(2*d));
-        return {startSpeed:v0,peakSpeed:v0,accelTime:0,cruiseTime:0,decelTime:v0/decel,accelDistance:0,cruiseDistance:0,decel,startsDecelerating:true,totalTime:v0/decel};
-    }
-
-    const cap=Math.max(MOVE_SPEED,v0);
-    const accelDistance=Math.max(0,(cap*cap-v0*v0)/(2*MOVE_ACCEL));
-    const decelDistance=cap*cap/(2*MOVE_DECEL);
-    if(accelDistance+decelDistance<=d){
-        const cruiseDistance=d-accelDistance-decelDistance;
-        const accelTime=(cap-v0)/MOVE_ACCEL;
-        const cruiseTime=cruiseDistance/cap;
-        const decelTime=cap/MOVE_DECEL;
-        return {startSpeed:v0,peakSpeed:cap,accelTime,cruiseTime,decelTime,accelDistance,cruiseDistance,decel:MOVE_DECEL,startsDecelerating:false,totalTime:accelTime+cruiseTime+decelTime};
-    }
-
-    const peakSquared=(d+v0*v0/(2*MOVE_ACCEL))*2*MOVE_ACCEL*MOVE_DECEL/(MOVE_ACCEL+MOVE_DECEL);
-    const peak=Math.sqrt(Math.max(v0*v0,peakSquared));
-    const accelTime=Math.max(0,(peak-v0)/MOVE_ACCEL);
-    const actualAccelDistance=Math.max(0,(peak*peak-v0*v0)/(2*MOVE_ACCEL));
-    const decelTime=peak/MOVE_DECEL;
-    return {startSpeed:v0,peakSpeed:peak,accelTime,cruiseTime:0,decelTime,accelDistance:actualAccelDistance,cruiseDistance:0,decel:MOVE_DECEL,startsDecelerating:false,totalTime:accelTime+decelTime};
-}
-function evalMove(movement,now){
-    const elapsed=Math.max(0,Math.min(movement.profile.totalTime,(now-movement.startTime)/1000));
-    const p=movement.profile;
-    let travelled=0,speed=0,phase='finished';
-    if(elapsed<p.accelTime){
-        travelled=p.startSpeed*elapsed+.5*MOVE_ACCEL*elapsed*elapsed;
-        speed=p.startSpeed+MOVE_ACCEL*elapsed;
-        phase='accelerating';
-    }else if(elapsed<p.accelTime+p.cruiseTime){
-        const t=elapsed-p.accelTime;
-        travelled=p.accelDistance+p.peakSpeed*t;
-        speed=p.peakSpeed;
-        phase='cruising';
-    }else if(elapsed<p.totalTime){
-        const t=elapsed-p.accelTime-p.cruiseTime;
-        travelled=p.accelDistance+p.cruiseDistance+p.peakSpeed*t-.5*p.decel*t*t;
-        speed=Math.max(0,p.peakSpeed-p.decel*t);
-        phase='decelerating';
-    }else{
-        travelled=movement.distance;
-    }
-    const ratio=movement.distance>0?Math.max(0,Math.min(1,travelled/movement.distance)):1;
-    return {x:movement.startX+movement.dirX*movement.distance*ratio,y:movement.startY+movement.dirY*movement.distance*ratio,speed,phase,finished:elapsed>=p.totalTime||now>=movement.hardStopAt};
-}
 const MOVE_COMMAND_CHUNK = BASE_MAX_STEP * 0.85;
 const MOVE_FINISH_EPSILON = 0.05;
+const MOVE_STOP_SPEED_EPSILON = 2.0;
 const MOVE_MAX_CHUNKS_PER_TICK = 16;
+const MOVE_INTEGRATION_MAX_DT_MS = 160;
+
+function clampVectorDelta(dx,dy,maxMagnitude){
+    const magnitude=Math.hypot(dx,dy);
+    if(magnitude<=maxMagnitude||magnitude<=1e-12) return {x:dx,y:dy};
+    const scale=maxMagnitude/magnitude;
+    return {x:dx*scale,y:dy*scale};
+}
+
+// Movement owns velocity, never an incremental position cursor. Protocol position still has one
+// source of truth: getPredictedTail(myId). Retarget changes only the destination; vx/vy survive.
+function evalMove(movement,now){
+    const tail=getPredictedTail(myId)||{x:movement.startX,y:movement.startY,alive:true};
+    const rawDt=Math.max(0,now-(Number.isFinite(movement.lastStepAt)?movement.lastStepAt:now));
+    const dt=Math.min(MOVE_INTEGRATION_MAX_DT_MS,rawDt)/1000;
+    const vx0=Number.isFinite(movement.vx)?movement.vx:0;
+    const vy0=Number.isFinite(movement.vy)?movement.vy:0;
+    const speed0=Math.hypot(vx0,vy0);
+    const dx=movement.targetX-tail.x,dy=movement.targetY-tail.y;
+    const distance=Math.hypot(dx,dy);
+    if(distance<=MOVE_FINISH_EPSILON&&speed0<=MOVE_STOP_SPEED_EPSILON){
+        return {x:movement.targetX,y:movement.targetY,vx:0,vy:0,speed:0,phase:'finished',finished:true,dt};
+    }
+    if(dt<=0){
+        return {x:tail.x,y:tail.y,vx:vx0,vy:vy0,speed:speed0,phase:speed0>MOVE_STOP_SPEED_EPSILON?'coasting':'accelerating',finished:false,dt};
+    }
+
+    const ux=distance>1e-9?dx/distance:0;
+    const uy=distance>1e-9?dy/distance:0;
+    // sqrt(2*a*d) gives a braking-aware target speed. The desired velocity points toward the
+    // destination, but the real velocity can rotate only by the acceleration budget below.
+    const desiredSpeed=Math.min(MOVE_SPEED,Math.sqrt(Math.max(0,2*MOVE_DECEL*distance)));
+    const desiredVx=ux*desiredSpeed,desiredVy=uy*desiredSpeed;
+    const dvx=desiredVx-vx0,dvy=desiredVy-vy0;
+    const slowing=desiredSpeed<speed0-1e-6;
+    const maxDv=(slowing?MOVE_DECEL:MOVE_ACCEL)*dt;
+    const limited=clampVectorDelta(dvx,dvy,maxDv);
+    let vx=vx0+limited.x,vy=vy0+limited.y;
+    let speed=Math.hypot(vx,vy);
+    if(speed>MOVE_SPEED&&speed>1e-9){ const scale=MOVE_SPEED/speed; vx*=scale; vy*=scale; speed=MOVE_SPEED; }
+
+    // Trapezoidal integration keeps acceleration continuous across retargets.
+    let nextX=tail.x+(vx0+vx)*0.5*dt;
+    let nextY=tail.y+(vy0+vy)*0.5*dt;
+    const projected=typeof clampWorldPoint==='function'?clampWorldPoint(nextX,nextY):{x:nextX,y:nextY};
+    if(Math.abs(projected.x-nextX)>1e-9) vx=0;
+    if(Math.abs(projected.y-nextY)>1e-9) vy=0;
+    nextX=projected.x; nextY=projected.y;
+
+    let remaining=Math.hypot(movement.targetX-nextX,movement.targetY-nextY);
+    // Once we are within one integration step, do not orbit the target because of lateral inertia.
+    // This is the only snap and it occurs after velocity-limited approach, not on retarget.
+    const nearRadius=Math.max(MOVE_FINISH_EPSILON,speed0*dt*0.55);
+    if(remaining>distance&&distance<=nearRadius){
+        nextX=movement.targetX; nextY=movement.targetY; vx=0; vy=0; speed=0; remaining=0;
+    }
+    if(remaining<=MOVE_FINISH_EPSILON){
+        nextX=movement.targetX; nextY=movement.targetY; vx=0; vy=0; speed=0;
+        return {x:nextX,y:nextY,vx,vy,speed,phase:'finished',finished:true,dt};
+    }
+
+    const turnDelta=Math.hypot(dvx,dvy);
+    let phase='cruising';
+    if(slowing) phase='decelerating';
+    else if(speed0<MOVE_SPEED-2) phase='accelerating';
+    else if(turnDelta>4) phase='steering';
+    return {x:nextX,y:nextY,vx,vy,speed,phase,finished:false,dt};
+}
 
 // Movement has exactly one protocol position source: getPredictedTail(myId).
-// The time profile only answers "where should the actor be at this time?".
-// It never owns an incremental/sample position used to build commands.
+// The velocity integrator only answers "where should the actor move next?".
 function emitMoveTowardAbsolute(movement,targetX,targetY){
     for(let i=0;i<MOVE_MAX_CHUNKS_PER_TICK;i++){
         if(moveState[myId]!==movement) return {ok:false,replaced:true,reached:false};
@@ -154,12 +167,18 @@ function emitMoveTowardAbsolute(movement,targetX,targetY){
         if(moveState[myId]!==movement) return {ok:false,replaced:true,reached:false};
         const after=getPredictedTail(myId);
         if(!after?.alive) return {ok:false,replaced:false,reached:false};
-        // A command must advance the local predicted chain immediately, even while certification is pending.
-        // If it did not, stop here rather than spin and duplicate the same command forever.
         if(Math.hypot(after.x-beforeX,after.y-beforeY)<=1e-9) return {ok:false,replaced:false,reached:false};
     }
     const tail=getPredictedTail(myId);
     return {ok:true,replaced:false,reached:Boolean(tail&&Math.hypot(targetX-tail.x,targetY-tail.y)<=MOVE_FINISH_EPSILON)};
+}
+
+function commitMoveVelocity(movement,evaluated,now){
+    if(moveState[myId]!==movement) return false;
+    movement.vx=Number.isFinite(evaluated.vx)?evaluated.vx:0;
+    movement.vy=Number.isFinite(evaluated.vy)?evaluated.vy:0;
+    movement.lastStepAt=now;
+    return true;
 }
 
 function flushActiveMoveToNow(now=performance.now()){
@@ -167,49 +186,50 @@ function flushActiveMoveToNow(now=performance.now()){
     if(!movement) return {sample:null,tail:getPredictedTail(myId)};
     const sample=evalMove(movement,now);
     const before=getPredictedTail(myId);
-    if(localCommandBackpressured()) return {sample:{...sample,phase:'backpressure',finished:false},tail:before};
+    if(localCommandBackpressured()){
+        movement.lastStepAt=now;
+        return {sample:{...sample,phase:'backpressure',finished:false},tail:before};
+    }
     tracePosition('flush:before',{force:true,now});
     const dx=before?sample.x-before.x:0,dy=before?sample.y-before.y:0;
     if(before&&Math.hypot(dx,dy)>MOVE_FINISH_EPSILON){
         const emitted=emitMoveTowardAbsolute(movement,sample.x,sample.y);
         if(!emitted.ok) return {sample,tail:getPredictedTail(myId)};
     }
+    commitMoveVelocity(movement,sample,now);
     const result={sample,tail:getPredictedTail(myId)};
-    tracePosition('flush:after',{force:true,now,extra:`desiredDelta=${dx.toFixed(3)},${dy.toFixed(3)}`});
+    tracePosition('flush:after',{force:true,now,extra:`desiredDelta=${dx.toFixed(3)},${dy.toFixed(3)} vel=${sample.vx.toFixed(1)},${sample.vy.toFixed(1)}`});
     return result;
 }
-function startMove(playerId,fromX,fromY,toX,toY){
+function startMove(playerId,fromX,fromY,toX,toY,options={}){
     if(playerId!==myId) return;
     const now=performance.now();
     tracePosition('retarget:input',{force:true,now,extra:`fromArg=${fromX.toFixed(2)},${fromY.toFixed(2)} click=${toX.toFixed(2)},${toY.toFixed(2)}`});
     const previous=moveState[myId];
-    // Retarget must never flush the old plan first. Flushing can synchronously mutate/replace
-    // the active plan during command commit and used to abort the retarget before it was armed.
-    // The protocol chain tail is already the only authoritative local position cursor.
     const previousSample=previous?evalMove(previous,now):null;
     const alignedTail=getPredictedTail(myId);
     const startX=alignedTail?.x??fromX,startY=alignedTail?.y??fromY;
     const dx=toX-startX,dy=toY-startY,distance=Math.hypot(dx,dy);
     if(distance<=MOVE_FINISH_EPSILON){ delete moveState[myId]; return; }
-    const currentSpeed=previousSample&&!previousSample.finished?Math.max(0,previousSample.speed||0):0;
-    const profile=buildMoveProfile(distance,currentSpeed);
+    const explicit=options&&options.initialVelocity;
+    const vx=Number.isFinite(explicit?.vx)?explicit.vx:(Number.isFinite(previousSample?.vx)?previousSample.vx:(Number.isFinite(previous?.vx)?previous.vx:0));
+    const vy=Number.isFinite(explicit?.vy)?explicit.vy:(Number.isFinite(previousSample?.vy)?previousSample.vy:(Number.isFinite(previous?.vy)?previous.vy:0));
     moveState[myId]={
-        startX,startY,targetX:toX,targetY:toY,dirX:dx/distance,dirY:dy/distance,distance,
-        startTime:now,profile,
-        hardStopAt:now+Math.max(MOVE_MAX_DURATION,(profile.totalTime+1)*1000),
-        lastWallAt:now
+        startX,startY,targetX:toX,targetY:toY,vx,vy,lastStepAt:now,
+        hardStopAt:now+MOVE_MAX_DURATION,lastWallAt:now
     };
-    tracePosition('retarget:armed',{force:true,now,extra:`start=${startX.toFixed(2)},${startY.toFixed(2)} speed0=${currentSpeed.toFixed(2)} dist=${distance.toFixed(2)}`});
+    tracePosition('retarget:armed',{force:true,now,extra:`start=${startX.toFixed(2)},${startY.toFixed(2)} vel0=${vx.toFixed(1)},${vy.toFixed(1)} speed0=${Math.hypot(vx,vy).toFixed(2)} dist=${distance.toFixed(2)}`});
 }
 function rebaseLocalMovementAfterRejection(sequence,reason){
     const movement=moveState[myId];
     if(!movement) return;
     const targetX=movement.targetX,targetY=movement.targetY;
+    const initialVelocity={vx:movement.vx||0,vy:movement.vy||0};
     delete moveState[myId];
     const base=confirmedWorld[myId];
     if(!base?.alive) return;
     if(Math.hypot(targetX-base.x,targetY-base.y)<=MOVE_FINISH_EPSILON) return;
-    startMove(myId,base.x,base.y,targetX,targetY);
+    startMove(myId,base.x,base.y,targetX,targetY,{initialVelocity});
     tracePosition('movement:rebased',{force:true,extra:`afterSeq=${sequence} reason=${reason}`});
 }
 
@@ -262,8 +282,8 @@ function tickMovement(){
     const wallDelta=Math.max(0,now-(movement.lastWallAt||now));
     movement.lastWallAt=now;
     if(localCommandBackpressured()){
-        // Freeze only the time profile. Protocol position remains the predicted chain tail.
-        movement.startTime+=wallDelta;
+        // Freeze integration during protocol backpressure. Velocity is preserved, not re-aimed.
+        movement.lastStepAt=now;
         movement.hardStopAt+=wallDelta;
         return;
     }
@@ -272,29 +292,32 @@ function tickMovement(){
     if(!tailBefore?.alive){ delete moveState[myId]; return; }
     const evaluated=evalMove(movement,now);
     const desiredDistance=Math.hypot(evaluated.x-tailBefore.x,evaluated.y-tailBefore.y);
-    tracePosition('move:sample',{now});
+    const currentVx=Number.isFinite(movement.vx)?movement.vx:0,currentVy=Number.isFinite(movement.vy)?movement.vy:0;
+    const nextVx=Number.isFinite(evaluated.vx)?evaluated.vx:0,nextVy=Number.isFinite(evaluated.vy)?evaluated.vy:0;
+    tracePosition('move:sample',{now,extra:`vel=${currentVx.toFixed(1)},${currentVy.toFixed(1)} nextVel=${nextVx.toFixed(1)},${nextVy.toFixed(1)}`});
 
-    if(desiredDistance>(evaluated.finished?MOVE_FINISH_EPSILON:0.05)){
-        tracePosition('move:emit-before',{force:true,now,extra:`desiredDelta=${(evaluated.x-tailBefore.x).toFixed(3)},${(evaluated.y-tailBefore.y).toFixed(3)}`});
+    if(desiredDistance>MOVE_FINISH_EPSILON){
+        tracePosition('move:emit-before',{force:true,now,extra:`desiredDelta=${(evaluated.x-tailBefore.x).toFixed(3)},${(evaluated.y-tailBefore.y).toFixed(3)} nextVel=${nextVx.toFixed(1)},${nextVy.toFixed(1)}`});
         const emitted=emitMoveTowardAbsolute(movement,evaluated.x,evaluated.y);
         if(!emitted.ok) return;
+        if(!commitMoveVelocity(movement,evaluated,now)) return;
         tracePosition('move:emit-after',{force:true,now});
-    }
+    }else if(!commitMoveVelocity(movement,evaluated,now)) return;
 
     if(moveState[myId]!==movement) return;
-    if(!evaluated.finished) return;
-
-    // Finishing is defined by the protocol chain reaching the target, not by a cached sample/phase.
     const tail=getPredictedTail(myId);
     if(!tail?.alive){ delete moveState[myId]; return; }
     const remaining=Math.hypot(movement.targetX-tail.x,movement.targetY-tail.y);
+    if(remaining>MOVE_FINISH_EPSILON&&now<movement.hardStopAt) return;
+
     if(remaining>MOVE_FINISH_EPSILON){
+        // Hard-stop is only a liveness failsafe. Still use bounded protocol commands.
         const emitted=emitMoveTowardAbsolute(movement,movement.targetX,movement.targetY);
         if(!emitted.ok||moveState[myId]!==movement) return;
-        const after=getPredictedTail(myId);
-        if(!after||Math.hypot(movement.targetX-after.x,movement.targetY-after.y)>MOVE_FINISH_EPSILON) return;
     }
-
+    const after=getPredictedTail(myId);
+    if(!after||Math.hypot(movement.targetX-after.x,movement.targetY-after.y)>MOVE_FINISH_EPSILON) return;
+    movement.vx=0; movement.vy=0;
     tracePosition('move:finish-before',{force:true,now});
     delete moveState[myId];
     queueLocalRenderTarget(getPredictedTail(myId));
