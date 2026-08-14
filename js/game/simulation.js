@@ -131,6 +131,26 @@ function evalMove(movement,now){
     const ratio=movement.distance>0?Math.max(0,Math.min(1,travelled/movement.distance)):1;
     return {x:movement.startX+movement.dirX*movement.distance*ratio,y:movement.startY+movement.dirY*movement.distance*ratio,speed,phase,finished:elapsed>=p.totalTime||now>=movement.hardStopAt};
 }
+const MOVE_COMMAND_CHUNK = BASE_MAX_STEP * 0.85;
+function emitMoveDeltaChunked(movement,dx,dy){
+    const distance=Math.hypot(dx,dy);
+    if(distance<=1e-9) return {ok:true,replaced:false};
+    const parts=Math.max(1,Math.ceil(distance/MOVE_COMMAND_CHUNK));
+    for(let i=0;i<parts;i++){
+        if(moveState[myId]!==movement) return {ok:false,replaced:true};
+        const remainingParts=parts-i;
+        const tail=getPredictedTail(myId);
+        if(!tail?.alive) return {ok:false,replaced:false};
+        const targetX=movement.sampleX+dx,targetY=movement.sampleY+dy;
+        const stepDx=(targetX-tail.x)/remainingParts,stepDy=(targetY-tail.y)/remainingParts;
+        const command=makeMoveCommand(stepDx,stepDy);
+        if(!command) return {ok:false,replaced:false};
+        executeLocal(command);
+        if(moveState[myId]!==movement) return {ok:false,replaced:true};
+    }
+    return {ok:true,replaced:false};
+}
+
 function flushActiveMoveToNow(now=performance.now()){
     const movement=moveState[myId];
     if(!movement) return {sample:null,tail:getPredictedTail(myId)};
@@ -139,9 +159,8 @@ function flushActiveMoveToNow(now=performance.now()){
     const sample=evalMove(movement,now);
     const dx=sample.x-movement.sampleX,dy=sample.y-movement.sampleY;
     if(Math.abs(dx)>1e-6||Math.abs(dy)>1e-6){
-        const command=makeMoveCommand(dx,dy);
-        if(!command) return {sample,tail:getPredictedTail(myId)};
-        executeLocal(command);
+        const emitted=emitMoveDeltaChunked(movement,dx,dy);
+        if(!emitted.ok) return {sample,tail:getPredictedTail(myId)};
         movement.sampleX=sample.x; movement.sampleY=sample.y;
         const tail=getPredictedTail(myId);
         if(tail){ movement.lastX=tail.x; movement.lastY=tail.y; }
@@ -241,19 +260,28 @@ function tickMovement(){
     const shouldEmit=evaluated.finished?(Math.abs(dx)>1e-6||Math.abs(dy)>1e-6):(Math.abs(dx)>.05||Math.abs(dy)>.05);
     if(shouldEmit){
         tracePosition('move:emit-before',{force:true,now,extra:`delta=${dx.toFixed(3)},${dy.toFixed(3)}`});
-        const command=makeMoveCommand(dx,dy);
-        if(!command) return;
-        executeLocal(command);
+        const emitted=emitMoveDeltaChunked(movement,dx,dy);
+        if(!emitted.ok) return;
         movement.sampleX=evaluated.x; movement.sampleY=evaluated.y;
         const tail=getPredictedTail(myId);
         if(tail){ movement.lastX=tail.x; movement.lastY=tail.y; }
         tracePosition('move:emit-after',{force:true,now});
     }
     if(evaluated.finished){
+        // The movement may have been replaced by a synchronous rejection/rebase above.
+        if(moveState[myId]!==movement) return;
         // 최종 보간점까지 반드시 chain에 반영된 뒤 렌더 source를 predicted state로 넘긴다.
         tracePosition('move:finish-before',{force:true,now});
         flushActiveMoveToNow(now);
-        for(let i=0;i<8;i++){ const tail=getPredictedTail(myId); if(!tail) break; const dx=movement.targetX-tail.x,dy=movement.targetY-tail.y; if(Math.hypot(dx,dy)<=0.01) break; const command=makeMoveCommand(dx,dy); if(!command) break; executeLocal(command); }
+        if(moveState[myId]!==movement) return;
+        for(let i=0;i<8;i++){
+            const tail=getPredictedTail(myId); if(!tail) break;
+            const dx=movement.targetX-tail.x,dy=movement.targetY-tail.y;
+            if(Math.hypot(dx,dy)<=0.01) break;
+            const emitted=emitMoveDeltaChunked(movement,dx,dy);
+            if(!emitted.ok) return;
+            movement.sampleX=movement.targetX; movement.sampleY=movement.targetY;
+        }
         delete moveState[myId];
         queueLocalRenderTarget(getPredictedTail(myId));
         tracePosition('move:finish-after',{force:true,now});

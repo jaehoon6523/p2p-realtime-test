@@ -33,7 +33,7 @@ p2p-realtime-test/
 
 - game protocol: **13**
 - signaling protocol: **5**
-- ruleset: **pssf-v13-r17**
+- ruleset: **pssf-v13-r18**
 - server-assigned actor policy: `assignmentId / topologyEpoch / validatorIds / quorum`
 - simulation stream (`move/heal/respawn`): actor state sequence + deterministic dependency chain
 - shoot event stream: independent `eventSeq` + `simulationRef(sequence,stateHash)` + aim vector
@@ -234,3 +234,8 @@ Bootstrap `snapshot` and `snapshotAck` bypass both TX and RX synthetic netem que
 - AUTO launcher staggers iframe joins by 900ms by default (`launchGap=` override).
 - Desired direct WebRTC edges are actively repaired by the deterministic offerer.
 - Launcher badges show live `mesh open/desired` status from each AUTO iframe.
+
+## r18 movement rejection recovery
+- MOVE_INVALID/rejection이 동기적으로 movement state를 rebase하면 이전 movement 객체를 즉시 폐기하고 현재 tick 후처리를 중단합니다.
+- 프레임/타이머 지연으로 한 번의 movement delta가 커진 경우 BASE_MAX_STEP보다 보수적인 chunk로 분할해 정상 입력이 MOVE_INVALID를 유발하지 않게 합니다.
+- 회귀 테스트: `tests/movement-stale-ref.js`.

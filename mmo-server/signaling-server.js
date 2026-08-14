@@ -5,7 +5,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 
 const PORT = Number(process.env.PORT) || 8090;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r17';
+const RULESET_REVISION = 'pssf-v13-r18';
 const MAX_ROOM_LENGTH = 96;
 const MAX_PEER_LENGTH = 96;
 const MAX_PAYLOAD = 128 * 1024;

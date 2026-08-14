@@ -12,3 +12,5 @@ node "$ROOT/tests/bootstrap-rx-ordering.js"
 echo 'PSSF all checks: PASS'
 node "$(dirname "$0")/auto-mesh-repair.js"
 node "$(dirname "$0")/bootstrap-command-backlog.js"
+
+node tests/movement-stale-ref.js

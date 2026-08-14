@@ -25,3 +25,8 @@ https://jaehoon6523.github.io/p2p-realtime-test/p2p-mmo-demo-hardened.html?signa
 ```
 
 정적 HTML은 저장소 루트에 두고, 분리된 런타임 코드는 루트의 `js/`를 상대 경로로 참조합니다.
+
+## r18 movement rejection recovery
+- MOVE_INVALID/rejection이 동기적으로 movement state를 rebase하면 이전 movement 객체를 즉시 폐기하고 현재 tick 후처리를 중단합니다.
+- 프레임/타이머 지연으로 한 번의 movement delta가 커진 경우 BASE_MAX_STEP보다 보수적인 chunk로 분할해 정상 입력이 MOVE_INVALID를 유발하지 않게 합니다.
+- 회귀 테스트: `tests/movement-stale-ref.js`.
