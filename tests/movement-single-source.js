@@ -21,6 +21,7 @@ const context={
   BASE_MAX_STEP:75,
   myId:'me',
   moveState:Object.create(null),
+  localMoveVelocity:{vx:0,vy:0,lastStepAt:1000},
   localCommandBackpressured:()=>false,
   predicted:{x:0,y:0,alive:true},
   emitted:[],
@@ -50,7 +51,10 @@ const tickEnd=sim.indexOf('\nfunction tickCombat(){',tickBegin);
 if(tickBegin<0||tickEnd<0) throw new Error('unable to isolate tickMovement');
 context.performance={now:()=>1000};
 context.roomReady=true;
-context.evalMove=(m)=>({x:m.targetX,y:m.targetY,speed:0,phase:'finished',finished:true});
+context.evalMove=(m)=>({x:m.targetX,y:m.targetY,vx:0,vy:0,speed:0,phase:'finished',finished:true});
+context.commitMoveVelocity=(sample,now)=>{ context.localMoveVelocity.vx=sample.vx; context.localMoveVelocity.vy=sample.vy; context.localMoveVelocity.lastStepAt=now; };
+context.readLocalMoveVelocity=()=>({...context.localMoveVelocity});
+context.stopLocalMovement=()=>{ delete context.moveState.me; context.localMoveVelocity={vx:0,vy:0,lastStepAt:1000}; };
 context.tracePosition=()=>{};
 context.queueLocalRenderTarget=()=>{};
 vm.runInContext(sim.slice(tickBegin,tickEnd)+'\nthis.runTick=()=>tickMovement();',context);

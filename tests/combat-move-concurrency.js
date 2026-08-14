@@ -31,6 +31,7 @@ const c={
   moveState:{me:activeMove},
   getPredictedTail:()=>({x:100,y:100,alive:true,lifeId:1,sequence:4}),
   flushActiveMoveToNow:()=>{ flushCount++; },
+  stopLocalMovement:()=>{ delete c.moveState.me; },
   makeShootCommand:(x,y,id)=>({type:'shoot',eventSeq:1,abilityId:id,aimX:x,aimY:y}),
   makeDashCommand:(x,y)=>({type:'dash',sequence:5,abilityId:'dash',dx:x,dy:y}),
   executeLocal:cmd=>executed.push(cmd),

@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r23';
+const RULESET_REVISION = 'pssf-v13-r24';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
@@ -107,7 +107,8 @@ const confirmedEventSeq = new Map(); // consequential event stream sequence (sho
 const simulationStateHistory = new Map(); // playerId -> Map(simulation seq -> state variants)
 const tickAnchors = new Map();
 const activityAnchors = new Map();
-const moveState = Object.create(null); // local input segment only
+const moveState = Object.create(null); // local destination plan only; never owns velocity
+const localMoveVelocity = {vx:0,vy:0,lastStepAt:performance.now()}; // persistent local physics state
 const POSITION_TRACE_INTERVAL_MS=100;
 const POSITION_TRACE_DIVERGENCE_WARN=1.5;
 let lastPositionTraceAt=0;

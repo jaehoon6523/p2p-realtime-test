@@ -110,7 +110,7 @@ function applyLocalRebaseRequired(remoteId,request){
     pendingOrderByPlayer.set(myId,(pendingOrderByPlayer.get(myId)||[]).filter(id=>pendingById.has(id)));
     visibleWorld[myId]={...state};
     localSequence=Math.max(localSequence,state.sequence);
-    delete moveState[myId];
+    stopLocalMovement({resetVelocity:true});
     queueLocalRenderTarget(state);
     for(const peerId of directOpenPeerIds()) sendSnapshot(peerId);
     sendPresence();

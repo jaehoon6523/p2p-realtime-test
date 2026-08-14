@@ -17,6 +17,7 @@ node "$ROOT/tests/movement-stale-ref.js"
 node "$ROOT/tests/movement-single-source.js"
 node "$ROOT/tests/movement-retarget-live.js"
 node "$ROOT/tests/movement-velocity-continuity.js"
+node "$ROOT/tests/movement-velocity-persistence.js"
 node "$ROOT/tests/combat-move-concurrency.js"
 node "$ROOT/tests/asset-version-pin.js"
 echo 'PSSF all checks: PASS'

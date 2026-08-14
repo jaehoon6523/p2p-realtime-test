@@ -22,6 +22,7 @@ function registerConfirmedHit(command,certificateServerTime=null){
         victim.deadObservedAt=now;
         victim.deadServerAt=Number.isFinite(certificateServerTime)?certificateServerTime:Date.now();
         delete moveState[command.claimedHitId];
+        if(command.claimedHitId===myId) resetLocalMoveVelocity();
         const assists=[...contributors.keys()].filter(id=>id!==command.playerId);
         registerKillOutcome(command.claimedHitId,victim.lifeId,command.playerId,assists,command.commandId);
         log('t-warn',`DEAD victim=${command.claimedHitId} killer=${command.playerId}`);
@@ -89,14 +90,36 @@ function clampVectorDelta(dx,dy,maxMagnitude){
     return {x:dx*scale,y:dy*scale};
 }
 
-// Movement owns velocity, never an incremental position cursor. Protocol position still has one
-// source of truth: getPredictedTail(myId). Retarget changes only the destination; vx/vy survive.
+// Velocity is persistent physics state, not part of a destination plan.
+// Retargeting replaces only moveState[myId].target*. It never creates or assigns a new speed.
+function readLocalMoveVelocity(){
+    return {
+        vx:Number.isFinite(localMoveVelocity.vx)?localMoveVelocity.vx:0,
+        vy:Number.isFinite(localMoveVelocity.vy)?localMoveVelocity.vy:0,
+        lastStepAt:Number.isFinite(localMoveVelocity.lastStepAt)?localMoveVelocity.lastStepAt:performance.now(),
+    };
+}
+function writeLocalMoveVelocity(vx,vy,now=performance.now()){
+    localMoveVelocity.vx=Number.isFinite(vx)?vx:0;
+    localMoveVelocity.vy=Number.isFinite(vy)?vy:0;
+    localMoveVelocity.lastStepAt=now;
+}
+function resetLocalMoveVelocity(now=performance.now()){
+    writeLocalMoveVelocity(0,0,now);
+}
+function stopLocalMovement({resetVelocity=true,now=performance.now()}={}){
+    delete moveState[myId];
+    if(resetVelocity) resetLocalMoveVelocity(now);
+}
+
+// Movement plan answers only "where is the destination?".
+// localMoveVelocity answers only "how fast and in which direction are we moving now?".
 function evalMove(movement,now){
     const tail=getPredictedTail(myId)||{x:movement.startX,y:movement.startY,alive:true};
-    const rawDt=Math.max(0,now-(Number.isFinite(movement.lastStepAt)?movement.lastStepAt:now));
+    const velocity=readLocalMoveVelocity();
+    const rawDt=Math.max(0,now-velocity.lastStepAt);
     const dt=Math.min(MOVE_INTEGRATION_MAX_DT_MS,rawDt)/1000;
-    const vx0=Number.isFinite(movement.vx)?movement.vx:0;
-    const vy0=Number.isFinite(movement.vy)?movement.vy:0;
+    const vx0=velocity.vx,vy0=velocity.vy;
     const speed0=Math.hypot(vx0,vy0);
     const dx=movement.targetX-tail.x,dy=movement.targetY-tail.y;
     const distance=Math.hypot(dx,dy);
@@ -109,8 +132,6 @@ function evalMove(movement,now){
 
     const ux=distance>1e-9?dx/distance:0;
     const uy=distance>1e-9?dy/distance:0;
-    // sqrt(2*a*d) gives a braking-aware target speed. The desired velocity points toward the
-    // destination, but the real velocity can rotate only by the acceleration budget below.
     const desiredSpeed=Math.min(MOVE_SPEED,Math.sqrt(Math.max(0,2*MOVE_DECEL*distance)));
     const desiredVx=ux*desiredSpeed,desiredVy=uy*desiredSpeed;
     const dvx=desiredVx-vx0,dvy=desiredVy-vy0;
@@ -130,8 +151,6 @@ function evalMove(movement,now){
     nextX=projected.x; nextY=projected.y;
 
     let remaining=Math.hypot(movement.targetX-nextX,movement.targetY-nextY);
-    // Once we are within one integration step, do not orbit the target because of lateral inertia.
-    // This is the only snap and it occurs after velocity-limited approach, not on retarget.
     const nearRadius=Math.max(MOVE_FINISH_EPSILON,speed0*dt*0.55);
     if(remaining>distance&&distance<=nearRadius){
         nextX=movement.targetX; nextY=movement.targetY; vx=0; vy=0; speed=0; remaining=0;
@@ -150,7 +169,6 @@ function evalMove(movement,now){
 }
 
 // Movement has exactly one protocol position source: getPredictedTail(myId).
-// The velocity integrator only answers "where should the actor move next?".
 function emitMoveTowardAbsolute(movement,targetX,targetY){
     for(let i=0;i<MOVE_MAX_CHUNKS_PER_TICK;i++){
         if(moveState[myId]!==movement) return {ok:false,replaced:true,reached:false};
@@ -173,12 +191,8 @@ function emitMoveTowardAbsolute(movement,targetX,targetY){
     return {ok:true,replaced:false,reached:Boolean(tail&&Math.hypot(targetX-tail.x,targetY-tail.y)<=MOVE_FINISH_EPSILON)};
 }
 
-function commitMoveVelocity(movement,evaluated,now){
-    if(moveState[myId]!==movement) return false;
-    movement.vx=Number.isFinite(evaluated.vx)?evaluated.vx:0;
-    movement.vy=Number.isFinite(evaluated.vy)?evaluated.vy:0;
-    movement.lastStepAt=now;
-    return true;
+function commitMoveVelocity(evaluated,now){
+    writeLocalMoveVelocity(evaluated.vx,evaluated.vy,now);
 }
 
 function flushActiveMoveToNow(now=performance.now()){
@@ -187,16 +201,18 @@ function flushActiveMoveToNow(now=performance.now()){
     const sample=evalMove(movement,now);
     const before=getPredictedTail(myId);
     if(localCommandBackpressured()){
-        movement.lastStepAt=now;
+        localMoveVelocity.lastStepAt=now;
         return {sample:{...sample,phase:'backpressure',finished:false},tail:before};
     }
     tracePosition('flush:before',{force:true,now});
     const dx=before?sample.x-before.x:0,dy=before?sample.y-before.y:0;
+    // Persist velocity before protocol emission. Even if the command path rebases/replaces the plan,
+    // the physics state is not silently reset to the plan's creation velocity.
+    commitMoveVelocity(sample,now);
     if(before&&Math.hypot(dx,dy)>MOVE_FINISH_EPSILON){
         const emitted=emitMoveTowardAbsolute(movement,sample.x,sample.y);
         if(!emitted.ok) return {sample,tail:getPredictedTail(myId)};
     }
-    commitMoveVelocity(movement,sample,now);
     const result={sample,tail:getPredictedTail(myId)};
     tracePosition('flush:after',{force:true,now,extra:`desiredDelta=${dx.toFixed(3)},${dy.toFixed(3)} vel=${sample.vx.toFixed(1)},${sample.vy.toFixed(1)}`});
     return result;
@@ -206,30 +222,40 @@ function startMove(playerId,fromX,fromY,toX,toY,options={}){
     const now=performance.now();
     tracePosition('retarget:input',{force:true,now,extra:`fromArg=${fromX.toFixed(2)},${fromY.toFixed(2)} click=${toX.toFixed(2)},${toY.toFixed(2)}`});
     const previous=moveState[myId];
-    const previousSample=previous?evalMove(previous,now):null;
+    const explicit=options&&options.initialVelocity;
+
+    // Advance only the persistent velocity to the retarget instant. The destination plan is replaced,
+    // but speed is never assigned by the click itself.
+    if(Number.isFinite(explicit?.vx)&&Number.isFinite(explicit?.vy)){
+        writeLocalMoveVelocity(explicit.vx,explicit.vy,now);
+    }else if(previous){
+        const previousSample=evalMove(previous,now);
+        commitMoveVelocity(previousSample,now);
+    }else{
+        resetLocalMoveVelocity(now);
+    }
+
     const alignedTail=getPredictedTail(myId);
     const startX=alignedTail?.x??fromX,startY=alignedTail?.y??fromY;
     const dx=toX-startX,dy=toY-startY,distance=Math.hypot(dx,dy);
-    if(distance<=MOVE_FINISH_EPSILON){ delete moveState[myId]; return; }
-    const explicit=options&&options.initialVelocity;
-    const vx=Number.isFinite(explicit?.vx)?explicit.vx:(Number.isFinite(previousSample?.vx)?previousSample.vx:(Number.isFinite(previous?.vx)?previous.vx:0));
-    const vy=Number.isFinite(explicit?.vy)?explicit.vy:(Number.isFinite(previousSample?.vy)?previousSample.vy:(Number.isFinite(previous?.vy)?previous.vy:0));
+    if(distance<=MOVE_FINISH_EPSILON){ stopLocalMovement({resetVelocity:true,now}); return; }
     moveState[myId]={
-        startX,startY,targetX:toX,targetY:toY,vx,vy,lastStepAt:now,
+        startX,startY,targetX:toX,targetY:toY,
         hardStopAt:now+MOVE_MAX_DURATION,lastWallAt:now
     };
-    tracePosition('retarget:armed',{force:true,now,extra:`start=${startX.toFixed(2)},${startY.toFixed(2)} vel0=${vx.toFixed(1)},${vy.toFixed(1)} speed0=${Math.hypot(vx,vy).toFixed(2)} dist=${distance.toFixed(2)}`});
+    const velocity=readLocalMoveVelocity();
+    tracePosition('retarget:armed',{force:true,now,extra:`start=${startX.toFixed(2)},${startY.toFixed(2)} vel=${velocity.vx.toFixed(1)},${velocity.vy.toFixed(1)} speed=${Math.hypot(velocity.vx,velocity.vy).toFixed(2)} dist=${distance.toFixed(2)}`});
 }
 function rebaseLocalMovementAfterRejection(sequence,reason){
     const movement=moveState[myId];
     if(!movement) return;
     const targetX=movement.targetX,targetY=movement.targetY;
-    const initialVelocity={vx:movement.vx||0,vy:movement.vy||0};
+    const velocity=readLocalMoveVelocity();
     delete moveState[myId];
     const base=confirmedWorld[myId];
-    if(!base?.alive) return;
-    if(Math.hypot(targetX-base.x,targetY-base.y)<=MOVE_FINISH_EPSILON) return;
-    startMove(myId,base.x,base.y,targetX,targetY,{initialVelocity});
+    if(!base?.alive){ resetLocalMoveVelocity(); return; }
+    if(Math.hypot(targetX-base.x,targetY-base.y)<=MOVE_FINISH_EPSILON){ resetLocalMoveVelocity(); return; }
+    startMove(myId,base.x,base.y,targetX,targetY,{initialVelocity:{vx:velocity.vx,vy:velocity.vy}});
     tracePosition('movement:rebased',{force:true,extra:`afterSeq=${sequence} reason=${reason}`});
 }
 
@@ -282,44 +308,43 @@ function tickMovement(){
     const wallDelta=Math.max(0,now-(movement.lastWallAt||now));
     movement.lastWallAt=now;
     if(localCommandBackpressured()){
-        // Freeze integration during protocol backpressure. Velocity is preserved, not re-aimed.
-        movement.lastStepAt=now;
+        // Freeze integration during protocol backpressure. Velocity is preserved exactly.
+        localMoveVelocity.lastStepAt=now;
         movement.hardStopAt+=wallDelta;
         return;
     }
 
     const tailBefore=getPredictedTail(myId);
-    if(!tailBefore?.alive){ delete moveState[myId]; return; }
+    if(!tailBefore?.alive){ stopLocalMovement({resetVelocity:true,now}); return; }
     const evaluated=evalMove(movement,now);
     const desiredDistance=Math.hypot(evaluated.x-tailBefore.x,evaluated.y-tailBefore.y);
-    const currentVx=Number.isFinite(movement.vx)?movement.vx:0,currentVy=Number.isFinite(movement.vy)?movement.vy:0;
-    const nextVx=Number.isFinite(evaluated.vx)?evaluated.vx:0,nextVy=Number.isFinite(evaluated.vy)?evaluated.vy:0;
-    tracePosition('move:sample',{now,extra:`vel=${currentVx.toFixed(1)},${currentVy.toFixed(1)} nextVel=${nextVx.toFixed(1)},${nextVy.toFixed(1)}`});
+    const velocity=readLocalMoveVelocity();
+    tracePosition('move:sample',{now,extra:`vel=${velocity.vx.toFixed(1)},${velocity.vy.toFixed(1)} nextVel=${evaluated.vx.toFixed(1)},${evaluated.vy.toFixed(1)}`});
+
+    // Physics advances once per movement tick, independently of how many protocol chunks are emitted.
+    commitMoveVelocity(evaluated,now);
 
     if(desiredDistance>MOVE_FINISH_EPSILON){
-        tracePosition('move:emit-before',{force:true,now,extra:`desiredDelta=${(evaluated.x-tailBefore.x).toFixed(3)},${(evaluated.y-tailBefore.y).toFixed(3)} nextVel=${nextVx.toFixed(1)},${nextVy.toFixed(1)}`});
+        tracePosition('move:emit-before',{force:true,now,extra:`desiredDelta=${(evaluated.x-tailBefore.x).toFixed(3)},${(evaluated.y-tailBefore.y).toFixed(3)} nextVel=${evaluated.vx.toFixed(1)},${evaluated.vy.toFixed(1)}`});
         const emitted=emitMoveTowardAbsolute(movement,evaluated.x,evaluated.y);
         if(!emitted.ok) return;
-        if(!commitMoveVelocity(movement,evaluated,now)) return;
-        tracePosition('move:emit-after',{force:true,now});
-    }else if(!commitMoveVelocity(movement,evaluated,now)) return;
+        tracePosition('move:emit-after',{force:true,now,extra:`vel=${localMoveVelocity.vx.toFixed(1)},${localMoveVelocity.vy.toFixed(1)}`});
+    }
 
     if(moveState[myId]!==movement) return;
     const tail=getPredictedTail(myId);
-    if(!tail?.alive){ delete moveState[myId]; return; }
+    if(!tail?.alive){ stopLocalMovement({resetVelocity:true,now}); return; }
     const remaining=Math.hypot(movement.targetX-tail.x,movement.targetY-tail.y);
     if(remaining>MOVE_FINISH_EPSILON&&now<movement.hardStopAt) return;
 
     if(remaining>MOVE_FINISH_EPSILON){
-        // Hard-stop is only a liveness failsafe. Still use bounded protocol commands.
         const emitted=emitMoveTowardAbsolute(movement,movement.targetX,movement.targetY);
         if(!emitted.ok||moveState[myId]!==movement) return;
     }
     const after=getPredictedTail(myId);
     if(!after||Math.hypot(movement.targetX-after.x,movement.targetY-after.y)>MOVE_FINISH_EPSILON) return;
-    movement.vx=0; movement.vy=0;
     tracePosition('move:finish-before',{force:true,now});
-    delete moveState[myId];
+    stopLocalMovement({resetVelocity:true,now});
     queueLocalRenderTarget(getPredictedTail(myId));
     tracePosition('move:finish-after',{force:true,now});
 }
@@ -328,7 +353,7 @@ function tickCombat(){
     if(!roomReady) return;
     if(AUTO_MODE) tickAutoMode();
     const me=getPredictedTail(myId); if(!me) return;
-    if(!me.alive){ delete moveState[myId]; const confirmed=confirmedWorld[myId]; if(confirmed&&!hasPendingType(myId,'respawn')&&performance.now()-(confirmed.deadObservedAt||0)>=RESPAWN_MS) executeLocal(makeRespawnCommand()); return; }
+    if(!me.alive){ stopLocalMovement({resetVelocity:true}); const confirmed=confirmedWorld[myId]; if(confirmed&&!hasPendingType(myId,'respawn')&&performance.now()-(confirmed.deadObservedAt||0)>=RESPAWN_MS) executeLocal(makeRespawnCommand()); return; }
     if(me.hp<MAX_HP&&!hasPendingType(myId,'heal')){ const activity=activityAnchors.get(myId); const idleMs=activity?performance.now()-Math.max(activity.lastMoveAt,activity.lastDamageAt,activity.lastHealAt):0; if(idleMs>=1000) executeLocal(makeHealCommand()); }
 }
 function hasPendingType(playerId,type){ return [...(pendingOrderByPlayer.get(playerId)||[]),...(pendingEventOrderByPlayer.get(playerId)||[])].some(id=>pendingById.get(id)?.command.type===type); }

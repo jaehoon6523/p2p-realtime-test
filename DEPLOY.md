@@ -15,7 +15,7 @@
 Expected startup log:
 
 ```text
-[p2p-arena-signaling] protocol=5 ruleset=pssf-v13-r23 base<=5 sim<=16 listening ws://0.0.0.0:<PORT>
+[p2p-arena-signaling] protocol=5 ruleset=pssf-v13-r24 base<=5 sim<=16 listening ws://0.0.0.0:<PORT>
 ```
 
 ## GitHub Pages
@@ -35,7 +35,7 @@ https://jaehoon6523.github.io/p2p-realtime-test/p2p-mmo-demo-hardened.html?signa
 
 ## Browser asset version pin
 
-- Expected build/ruleset: `pssf-v13-r23`
-- Demo HTML script URLs are pinned with `?v=pssf-v13-r23`.
-- Public test URLs should include `&build=pssf-v13-r23` so the HTML document itself also gets a distinct cache key.
-- After deploy, reject any browser log whose `local peer boot` line is not `ruleset=pssf-v13-r23`.
+- Expected build/ruleset: `pssf-v13-r24`
+- Demo HTML script URLs are pinned with `?v=pssf-v13-r24`.
+- Public test URLs should include `&build=pssf-v13-r24` so the HTML document itself also gets a distinct cache key.
+- After deploy, reject any browser log whose `local peer boot` line is not `ruleset=pssf-v13-r24`.

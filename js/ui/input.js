@@ -39,7 +39,7 @@ function tryCastAbility(key,{aimPoint=null,source='INPUT'}={}){
         // active movement plan merely to fire. Dash is a simulation movement ability and replaces it.
         if(ability.kind==='dash'){
             flushActiveMoveToNow();
-            delete moveState[myId];
+            stopLocalMovement({resetVelocity:true});
         }
         const current=getPredictedTail(myId);
         if(!current?.alive) return abilitySuppressed(ability,'DEAD_DURING_CAST');
@@ -72,5 +72,5 @@ window.addEventListener('keydown',event=>{
     if(ABILITY_DEFINITIONS[key]){ event.preventDefault(); tryCastAbility(key); return; }
     let dx=0,dy=0; const step=16;
     if(event.key==='ArrowUp')dy=-step; else if(event.key==='ArrowDown')dy=step; else if(event.key==='ArrowLeft')dx=-step; else if(event.key==='ArrowRight')dx=step; else return;
-    event.preventDefault(); const me=getPredictedTail(myId); if(!me?.alive) return; delete moveState[myId]; executeLocal(makeMoveCommand(dx,dy));
+    event.preventDefault(); const me=getPredictedTail(myId); if(!me?.alive) return; stopLocalMovement({resetVelocity:true}); executeLocal(makeMoveCommand(dx,dy));
 });
