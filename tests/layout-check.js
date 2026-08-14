@@ -65,6 +65,8 @@ if(!factory.includes('pendingShootCount(myId)')) throw new Error('shoot-specific
 if(!factory.includes("SHOOT_SUPPRESSED code=${code}")) throw new Error('shoot suppression telemetry missing');
 const autoBrain = fs.readFileSync(must('js/testing/auto-brain.js'),'utf8');
 if(autoBrain.includes("hasPendingType(myId,'shoot')")) throw new Error('AUTO still blocks on any pending shoot');
+if(!autoBrain.includes('const ability=ABILITY_DEFINITIONS.Q;')) throw new Error('AUTO Q-only attack path missing');
+if(autoBrain.includes('ABILITY_DEFINITIONS.W') || autoBrain.includes('makeDashCommand(')) throw new Error('AUTO must not use W/E abilities');
 
 const bootstrap = fs.readFileSync(must('js/core/bootstrap.js'),'utf8');
 if(!bootstrap.includes('requestAnimationFrame(draw);')) throw new Error('render loop bootstrap missing');
@@ -73,7 +75,7 @@ const abilityData = fs.readFileSync(must('js/game/ability-definitions.js'),'utf8
 const config = fs.readFileSync(must('js/core/config-state.js'),'utf8');
 const server = fs.readFileSync(must('mmo-server/signaling-server.js'),'utf8');
 if(!config.includes('const MAX_PENDING_SHOOTS = 4;')) throw new Error('shoot concurrency cap missing');
-for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r11';"]){
+for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r12';"]){
   if(!config.includes(expected)) throw new Error(`client missing ${expected}`);
   if(!server.includes(expected)) throw new Error(`server missing ${expected}`);
 }

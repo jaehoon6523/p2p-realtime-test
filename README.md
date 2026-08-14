@@ -33,7 +33,7 @@ p2p-realtime-test/
 
 - game protocol: **13**
 - signaling protocol: **5**
-- ruleset: **pssf-v13-r11**
+- ruleset: **pssf-v13-r12**
 - server-assigned actor policy: `assignmentId / topologyEpoch / validatorIds / quorum`
 - simulation stream (`move/heal/respawn`): actor state sequence + deterministic dependency chain
 - shoot event stream: independent `eventSeq` + `simulationRef(sequence,stateHash)` + aim vector
@@ -141,6 +141,10 @@ Runtime 탭의 상단은 현재 상태 판단용 지표만 표시합니다.
 누적 confirmed/rejected/ignored/deferred/resync, epoch, AOI, checkpoint, relay 내부 통계는 `Advanced Diagnostics`에 접어 두었습니다. 프로토콜 동작은 변경하지 않은 UI 정리입니다.
 
 
+
+## AUTO combat policy (r12)
+
+AUTO peers use **Q/basic_attack only** for combat. They never cast W or E. Targeting/movement stays autonomous, but attack execution uses the same Q `makeShootCommand` → validation → QC path as a normal peer.
 
 ## Optimistic UX / authoritative correction (r11)
 

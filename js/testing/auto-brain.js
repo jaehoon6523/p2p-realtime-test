@@ -9,8 +9,6 @@ const autoBrain = {
     targetId:null,
     nextRetargetAt:0,
     nextFireAt:0,
-    nextLongShotAt:0,
-    nextDashAt:0,
     nextWanderAt:0,
     strafeSign:Math.random()<.5?-1:1,
     wanderX:null,
@@ -104,15 +102,12 @@ function autoShoot(target,now){
     const aimY=tr.y+(Math.random()-.5)*7;
     const adx=aimX-shooter.x, ady=aimY-shooter.y;
     const len=Math.hypot(adx,ady)||1;
-    const useW=distance>MAX_RANGE*.9 && now>=autoBrain.nextLongShotAt && Math.random()<.45;
-    const ability=useW?ABILITY_DEFINITIONS.W:ABILITY_DEFINITIONS.Q;
+    // AUTO 전투는 예전 평타 봇처럼 Q만 사용한다.
+    // W/E 선택 로직은 두지 않고, Q 사거리 밖이면 이동 AI가 접근하도록 맡긴다.
+    const ability=ABILITY_DEFINITIONS.Q;
     if(distance>ability.range-4) return;
-    if(useW) autoBrain.nextLongShotAt=now+ABILITY_DEFINITIONS.W.cooldownMs;
-    setTimeout(()=>{ const cmd=makeShootCommand(adx/len,ady/len,ability.id); if(cmd) executeLocal(cmd); },ability.castMs);
-    if(distance<75&&now>=autoBrain.nextDashAt&&Math.random()<.25){
-        autoBrain.nextDashAt=now+ABILITY_DEFINITIONS.E.cooldownMs;
-        setTimeout(()=>{ const cmd=makeDashCommand(-adx/len,-ady/len); if(cmd) executeLocal(cmd); },ABILITY_DEFINITIONS.E.castMs);
-    }
+    const cmd=makeShootCommand(adx/len,ady/len,ability.id);
+    if(cmd) executeLocal(cmd);
 }
 
 function tickAutoMode(){
