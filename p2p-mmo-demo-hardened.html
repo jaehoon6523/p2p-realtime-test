@@ -158,7 +158,7 @@ aside{width:430px}
         <details class="runtimeDiagnostics"><summary>Advanced Diagnostics</summary><div class="diagBody"><div class="row"><span>epoch</span><span id="epochStat">-</span></div><div class="row"><span>AOI / direct / room</span><span id="aoiPeerStat">0</span></div><div class="row"><span>confirmed total</span><span id="confirmedStat">0</span></div><div class="row"><span>rejected no-op</span><span id="rejectedStat">0</span></div><div class="row"><span>ignored duplicate/stale</span><span id="ignoredStat">0</span></div><div class="row"><span>deferred events</span><span id="deferredStat">0</span></div><div class="row"><span>resync events</span><span id="resyncStat">0</span></div><div class="row"><span>stalled total</span><span id="stalledStat">0</span></div><div class="row"><span>assignment mismatch</span><span id="membershipMismatchStat">0</span></div><div class="row"><span>relay cache / direct</span><span id="relayStat">0 / 0</span></div><div class="row"><span>shoot checkpoint</span><span id="checkpointStat">0 players</span></div><div class="row"><span>relay accepted / suppressed</span><span id="relayMetricStat">0 / 0</span></div></div></details>
         <div class="block" style="padding-bottom:8px"><h2>Legend</h2><div class="legend"><span>white ring: local</span><span>orange ring: pending</span><span>green circle: AOI</span><span>blue dash: relay</span><span>gray: dead</span></div></div>
     </div>
-    <div class="block" id="logBlock"><h2>Event / Validation Log</h2><div class="logToolbar"><button class="logFilter active" data-filter="all" onclick="setLogFilter('all')">전체 <span id="logCountAll">0</span></button><button class="logFilter" data-filter="error" onclick="setLogFilter('error')">오류 <span id="logCountError">0</span></button><button class="logFilter" data-filter="warn" onclick="setLogFilter('warn')">경고 <span id="logCountWarn">0</span></button><button class="logFilter" data-filter="signal" onclick="setLogFilter('signal')">시그널 <span id="logCountSignal">0</span></button><button class="logFilter" data-filter="combat" onclick="setLogFilter('combat')">전투 <span id="logCountCombat">0</span></button><button class="logFilter" data-filter="position" onclick="setLogFilter('position')">위치 <span id="logCountPosition">0</span></button><span class="spacer"></span><button onclick="clearLogs()">지우기</button></div><div id="log"><div id="logEmpty">선택한 조건의 로그가 없습니다.</div></div></div>
+    <div class="block" id="logBlock"><h2>Event / Validation Log</h2><div class="logToolbar"><button class="logFilter active" data-filter="all" onclick="setLogFilter('all')">전체 <span id="logCountAll">0</span></button><button class="logFilter" data-filter="error" onclick="setLogFilter('error')">오류 <span id="logCountError">0</span></button><button class="logFilter" data-filter="warn" onclick="setLogFilter('warn')">경고 <span id="logCountWarn">0</span></button><button class="logFilter" data-filter="signal" onclick="setLogFilter('signal')">시그널 <span id="logCountSignal">0</span></button><button class="logFilter" data-filter="combat" onclick="setLogFilter('combat')">전투 <span id="logCountCombat">0</span></button><button class="logFilter" data-filter="position" onclick="setLogFilter('position')">위치 <span id="logCountPosition">0</span></button><span class="spacer"></span><button id="copyLogsBtn" onclick="copyLogsToClipboard()">로그 복사</button><button onclick="clearLogs()">지우기</button></div><div id="log"><div id="logEmpty">선택한 조건의 로그가 없습니다.</div></div></div>
     </section>
 
     <section id="architectureView" class="consoleView"></section>
@@ -207,22 +207,22 @@ function renderVerificationConsole(){
 renderArchitectureConsole(); renderContractsConsole(); renderVerificationConsole();
 
 </script>
-<script>window.PSSF_PAGE_BUILD='pssf-v13-r24';</script>
-<script src="js/game/ability-definitions.js?v=pssf-v13-r24"></script>
-<script src="js/core/config-state.js?v=pssf-v13-r24"></script>
-<script src="js/core/membership-topology.js?v=pssf-v13-r24"></script>
-<script src="js/game/ruleset.js?v=pssf-v13-r24"></script>
-<script src="js/core/command-factory.js?v=pssf-v13-r24"></script>
-<script src="js/core/disposition.js?v=pssf-v13-r24"></script>
-<script src="js/core/event-stream.js?v=pssf-v13-r24"></script>
-<script src="js/game/simulation.js?v=pssf-v13-r24"></script>
-<script src="js/testing/netem.js?v=pssf-v13-r24"></script>
-<script src="js/core/verification.js?v=pssf-v13-r24"></script>
-<script src="js/transport/network.js?v=pssf-v13-r24"></script>
-<script src="js/ui/input.js?v=pssf-v13-r24"></script>
-<script src="js/testing/auto-brain.js?v=pssf-v13-r24"></script>
-<script src="js/ui/runtime-ui.js?v=pssf-v13-r24"></script>
-<script src="js/core/bootstrap.js?v=pssf-v13-r24"></script>
+<script>window.PSSF_PAGE_BUILD='pssf-v13-r25';</script>
+<script src="js/game/ability-definitions.js?v=pssf-v13-r25"></script>
+<script src="js/core/config-state.js?v=pssf-v13-r25"></script>
+<script src="js/core/membership-topology.js?v=pssf-v13-r25"></script>
+<script src="js/game/ruleset.js?v=pssf-v13-r25"></script>
+<script src="js/core/command-factory.js?v=pssf-v13-r25"></script>
+<script src="js/core/disposition.js?v=pssf-v13-r25"></script>
+<script src="js/core/event-stream.js?v=pssf-v13-r25"></script>
+<script src="js/game/simulation.js?v=pssf-v13-r25"></script>
+<script src="js/testing/netem.js?v=pssf-v13-r25"></script>
+<script src="js/core/verification.js?v=pssf-v13-r25"></script>
+<script src="js/transport/network.js?v=pssf-v13-r25"></script>
+<script src="js/ui/input.js?v=pssf-v13-r25"></script>
+<script src="js/testing/auto-brain.js?v=pssf-v13-r25"></script>
+<script src="js/ui/runtime-ui.js?v=pssf-v13-r25"></script>
+<script src="js/core/bootstrap.js?v=pssf-v13-r25"></script>
 
 <script type="application/json" id="architectureIdeaIndex">
 {

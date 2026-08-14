@@ -228,8 +228,15 @@ function ingestCommand(command,remote,{reentry=false}={}){
 
     if(!pendingById.has(command.commandId)) return;
     const validators=validatorsFor(command),quorum=quorumFor(command);
+    const serverBoundRemoteAudit=remote&&verificationRequired(command);
+
+    // Any direct receiver can deterministically replay a remote consequential command.
+    // The signaling server alone accepts receipts from validatorIds bound to assignmentId, so
+    // a stale/missing client-side policy cache can no longer suppress a legitimate validator vote.
+    if(serverBoundRemoteAudit) runAudit(command);
+
     if(!validators.length||!quorum){
-        if(serverPeerCount<=1&&directOpenPeerIds().length===0){
+        if(serverPeerCount<=1&&directOpenPeerIds().length===0&&!remote){
             const result=evaluateCommand(command,pending);
             handleRuleResult(command,pending,result);
             const live=pendingById.get(command.commandId);
@@ -237,16 +244,21 @@ function ingestCommand(command,remote,{reentry=false}={}){
                 log('t-sys',`${command.type} solo fallback ${live.verdict} id=${command.commandId}`);
                 if(commandStream(command)==='event') drainEventCommits(command.playerId); else drainCommits(command.playerId);
             }
-        }else{
+            return;
+        }
+        // A remote peer may not have the actor's policy cached, but it can still audit and the
+        // server will bind the receipt to the authoritative assignment. Wait for that certificate.
+        if(!serverBoundRemoteAudit){
             pending.stalled=true;
             stalledCounter++;
             log('t-warn',`STALLED ${command.type} id=${command.commandId}: validators unavailable; q0 fallback disabled in multiplayer`);
+            return;
         }
-        return;
+        log('t-cmd',`${command.type} tentative id=${command.commandId} ${commandSequenceText(command)} validators=server-bound quorum=server-bound`);
+    }else{
+        log('t-cmd',`${command.type} tentative id=${command.commandId} ${commandSequenceText(command)}${command.type==='shoot'?` ability=${command.abilityId} refSim=${command.simulationRef.sequence}`:command.type==='dash'?` ability=${command.abilityId}`:''} validators=${validators.join(',')} quorum=${quorum}`);
+        if(!remote&&validators.includes(myId)) runAudit(command);
     }
-
-    log('t-cmd',`${command.type} tentative id=${command.commandId} ${commandSequenceText(command)}${command.type==='shoot'?` ability=${command.abilityId} refSim=${command.simulationRef.sequence}`:command.type==='dash'?` ability=${command.abilityId}`:''} validators=${validators.join(',')} quorum=${quorum}`);
-    if(validators.includes(myId)) runAudit(command);
     pending.timeoutId=setTimeout(()=>{
         const live=pendingById.get(command.commandId);
         if(live&&!live.verdict&&!live.stalled){

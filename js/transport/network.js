@@ -137,6 +137,7 @@ async function handleSignalMessage(message){
         signalLog('t-sig',`joined room=${ROOM_ID} peers=${serverPeerCount} assignment=${selfTopologyPolicy?.assignmentId||'n/a'}`);
         clearInterval(signalKeepaliveTimer); signalKeepaliveTimer=setInterval(()=>sendSignal({type:'keepalive'}),SIGNAL_KEEPALIVE_MS);
         sendPresence();
+        if(typeof flushPendingVerificationReceipts==='function') flushPendingVerificationReceipts();
         return;
     }
     if(message.type==='join-error'){

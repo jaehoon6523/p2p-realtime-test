@@ -170,6 +170,16 @@ vm.runInContext(`
   acceptDeferred('peerB','simulation');
   if((confirmedSeq.get('peerB')||0)!==7) throw new Error('post-resync simulation replay failed');
 
+  // r25 multiplayer regression: remote verified command audits even when the actor policy
+  // is absent from this peer's local cache. The server will bind/filter the receipt.
+  initializePlayer('auditActor',420,420,colorFor('auditActor'),{tick:currentTick(),sequence:0,eventSequence:0});
+  const auditBase={...confirmedWorld.auditActor};
+  const auditTick=currentTick();
+  const auditCheckpoint=[{playerId:'auditActor',x:auditBase.x,y:auditBase.y,alive:true,lifeId:auditBase.lifeId,sequence:auditBase.sequence,tick:auditBase.tick}];
+  const auditCommand={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,stream:'event',type:'shoot',abilityId:'basic_attack',abilitySeq:1,castStartTick:auditTick,previousAbilityRef:null,previousSameAbilityRef:null,commandId:'audit-remote-e1',playerId:'auditActor',eventSeq:1,simulationRef:{sequence:auditBase.sequence,stateHash:simulationRefHash(auditBase)},tick:auditTick,topologyEpoch:999,assignmentId:'server-only-assignment',aoiRadius:AOI_RADIUS,aimX:1,aimY:0,checkpoint:auditCheckpoint,checkpointHash:stableHash(auditCheckpoint),claimedHitId:null,claimedHitLifeId:null};
+  receiveCommand('auditActor',auditCommand);
+  if(!pendingVerificationReceipts.has('audit-remote-e1:server-only-assignment')) throw new Error('remote audit was suppressed by missing local actor policy');
+
   const invalidBefore=invalidCounter;
   handleSignalMessage({type:'verification-certificate',from:'evil'});
   if(invalidCounter!==invalidBefore+1) throw new Error('server-only guard failed');

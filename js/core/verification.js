@@ -2,10 +2,55 @@
 
 // HotStuff-inspired narrow borrowing: a certificate is bound to one exact evidence hash.
 // Finality remains per command stream; this is not global consensus.
+// Receipt delivery is durable across transient signaling disconnects. The server still decides
+// whether this peer is an assigned validator for command.assignmentId.
+const pendingVerificationReceipts=new Map();
+const AUDIT_RECEIPT_RETRY_MS=400;
+const AUDIT_RECEIPT_RETRY_TTL_MS=10000;
+function verificationReceiptKey(receipt){ return `${receipt.commandId}:${receipt.assignmentId}`; }
+function trySendVerificationReceipt(key){
+    const item=pendingVerificationReceipts.get(key);
+    if(!item||!item.ready) return false;
+    if(performance.now()-item.queuedAt>AUDIT_RECEIPT_RETRY_TTL_MS){
+        pendingVerificationReceipts.delete(key);
+        log('t-warn',`AUDIT_RECEIPT_EXPIRED id=${item.receipt.commandId}`);
+        return false;
+    }
+    const sent=sendSignal({type:'verification-receipt',receipt:item.receipt});
+    if(sent){
+        pendingVerificationReceipts.delete(key);
+        log('t-audit',`AUDIT_RECEIPT_TX id=${item.receipt.commandId} decision=${item.receipt.decision} code=${item.receipt.resultCode} evidence=${item.receipt.evidenceHash} computed=${item.receipt.computedHash}`);
+        return true;
+    }
+    if(AUTO_DEBUG&&!item.sendFailureLogged){
+        item.sendFailureLogged=true;
+        log('t-warn',`AUDIT_RECEIPT_WAIT_SIGNAL id=${item.receipt.commandId}`);
+    }
+    return false;
+}
+function queueVerificationReceipt(receipt){
+    const key=verificationReceiptKey(receipt);
+    const existing=pendingVerificationReceipts.get(key);
+    const item={receipt,queuedAt:existing?.queuedAt||performance.now(),ready:false,sendFailureLogged:false};
+    pendingVerificationReceipts.set(key,item);
+    scheduleNetem('tx','SERVER-AUDIT','verification-receipt',()=>{
+        const live=pendingVerificationReceipts.get(key);
+        if(!live) return;
+        live.ready=true;
+        trySendVerificationReceipt(key);
+    });
+}
+function flushPendingVerificationReceipts(){
+    for(const key of [...pendingVerificationReceipts.keys()]) trySendVerificationReceipt(key);
+}
+setInterval(flushPendingVerificationReceipts,AUDIT_RECEIPT_RETRY_MS);
+
 function runAudit(command){
     const pending=pendingById.get(command.commandId);
     if(!pending) return;
-    const result=evaluateCommand(command,pending);
+    // The server owns assignment membership. A validator must be able to replay the command
+    // even if its local peer-policy cache is stale or missing.
+    const result=evaluateCommand(command,pending,{skipPolicyCheck:true});
     const evidenceHash=commandFingerprint(command);
     const decision=result.disposition===RULE_DISPOSITION.ACCEPT
         ? 'accept'
@@ -26,9 +71,8 @@ function runAudit(command){
         computedHash:stableHash(result.computed||null),
         evidenceHash,
     };
-    scheduleNetem('tx','SERVER-AUDIT','verification-receipt',()=>{
-        if(!sendSignal({type:'verification-receipt',receipt})) log('t-warn',`verification receipt signaling failed id=${command.commandId}`);
-    });
+    queueVerificationReceipt(receipt);
+    if(AUTO_DEBUG) log('t-audit',`AUDIT_EVAL id=${command.commandId} actor=${command.playerId} decision=${decision} code=${result.code}`);
 
     if(result.disposition===RULE_DISPOSITION.DEFER&&Number.isFinite(result.retryMs)){
         setTimeout(()=>{

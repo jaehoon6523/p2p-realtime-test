@@ -108,12 +108,15 @@ function evaluateAbilityContract(command){
     return {disposition:RULE_DISPOSITION.ACCEPT,code:'ABILITY_VALID',reason:'ability timing and lineage verified',computed:{abilitySeq:command.abilitySeq,abilityId:command.abilityId,castTicks,timing},advanceTick:false};
 }
 
-function evaluateCommand(command,pendingOverride=null){
+function evaluateCommand(command,pendingOverride=null,{skipPolicyCheck=false}={}){
     const pending=pendingOverride||pendingById.get(command.commandId);
     if(!pending) return {disposition:RULE_DISPOSITION.RESYNC,code:'MISSING_PENDING',reason:'missing pending context',computed:null,advanceTick:false};
     const previous=pending.previousState;
 
-    if(!commandPolicyMatches(command)){
+    // Remote validator liveness must not depend on a locally cached copy of the actor policy.
+    // The signaling server is the authority that binds assignmentId -> validatorIds/quorum and
+    // rejects receipts from peers that are not validators for that assignment.
+    if(!skipPolicyCheck&&!commandPolicyMatches(command)){
         return {disposition:RULE_DISPOSITION.RESYNC,code:'ASSIGNMENT_MISMATCH',reason:'server assignment mismatch',computed:null,advanceTick:false};
     }
 

@@ -35,7 +35,7 @@ p2p-realtime-test/
 
 - game protocol: **13**
 - signaling protocol: **5**
-- ruleset: **pssf-v13-r24**
+- ruleset: **pssf-v13-r25**
 - server-assigned actor policy: `assignmentId / topologyEpoch / validatorIds / quorum`
 - simulation stream (`move/heal/respawn`): actor state sequence + deterministic dependency chain
 - shoot event stream: independent `eventSeq` + `simulationRef(sequence,stateHash)` + aim vector
@@ -251,3 +251,10 @@ Large frame gaps are still chunked below the movement validation limit. Retarget
 - `localMoveVelocity` is persistent physics state shared across movement ticks and retargets.
 - Protocol move chunk emission no longer owns/resets acceleration state.
 - Stopping, death, dash replacement, arrow-key override, and canonical rebase explicitly zero velocity.
+
+
+## r25 multiplayer audit liveness
+- Remote verified commands are replayed by direct receivers without requiring a fresh client-side actor-policy cache.
+- The signaling server remains the authority that accepts receipts only from validatorIds bound to assignmentId.
+- Verification receipts survive transient signaling disconnects and retry after rejoin.
+- Runtime log toolbar includes an all-log clipboard copy button.

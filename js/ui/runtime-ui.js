@@ -75,4 +75,27 @@ function updateLogCounts(){
 }
 function setLogFilter(filter){ activeLogFilter=filter; document.querySelectorAll('.logFilter[data-filter]').forEach(button=>button.classList.toggle('active',button.dataset.filter===filter)); renderLogs(); }
 function clearLogs(){ logHistory.length=0; pendingLogs=[]; renderLogs(); }
-window.setLogFilter=setLogFilter; window.clearLogs=clearLogs;
+
+async function copyLogsToClipboard(){
+    const snapshot=[...logHistory,...pendingLogs];
+    const header=[
+        '# PSSF Runtime Log',
+        `peer=${myId} mode=${AUTO_MODE?'AUTO':'MANUAL'} protocol=${PROTOCOL} ruleset=${RULESET_REVISION} room=${ROOM_ID}`,
+        `connections=${directOpenPeerIds().length} membership=${serverPeerCount} room / ${directOpenPeerIds().length} direct`,
+        ''
+    ];
+    const body=snapshot.map(item=>`[${item.time}] ${item.message}`);
+    const text=[...header,...body].join('\n');
+    let copied=false;
+    try{
+        if(navigator.clipboard?.writeText){ await navigator.clipboard.writeText(text); copied=true; }
+    }catch(_){}
+    if(!copied){
+        const area=document.createElement('textarea'); area.value=text; area.setAttribute('readonly',''); area.style.position='fixed'; area.style.opacity='0'; document.body.appendChild(area); area.select();
+        try{ copied=document.execCommand('copy'); }catch(_){} area.remove();
+    }
+    const button=document.getElementById('copyLogsBtn');
+    if(button){ const old=button.textContent; button.textContent=copied?'복사됨':'복사 실패'; setTimeout(()=>{button.textContent=old;},1200); }
+    return copied;
+}
+window.setLogFilter=setLogFilter; window.clearLogs=clearLogs; window.copyLogsToClipboard=copyLogsToClipboard;
