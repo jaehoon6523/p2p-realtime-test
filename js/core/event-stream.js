@@ -110,7 +110,7 @@ function executeLocal(command){
     if(!command) return;
     ingestCommand(command,false);
     const policy=policyForCommand(command);
-    for(const id of policy?.directPeers||[]) if(isPeerOpen(id)) safeDataSend(id,{kind:'command',command});
+    for(const id of policy?.directPeers||[]) if(isPeerOpen(id)) sendCommandToPeer(id,command);
 }
 
 function receiveCommand(remoteId,command){

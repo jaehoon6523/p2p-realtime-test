@@ -282,7 +282,7 @@ function removePeer(remoteId,reason='unknown'){
         if(peer.dc){ peer.dc.onopen=peer.dc.onmessage=peer.dc.onclose=peer.dc.onerror=null; }
         if(peer.pc){ peer.pc.onicecandidate=peer.pc.onconnectionstatechange=peer.pc.ondatachannel=null; }
         try{ if(peer.dc?.readyState!=='closed') peer.dc?.close(); }catch(_){} try{ if(peer.pc?.connectionState!=='closed') peer.pc?.close(); }catch(_){}
-        delete confirmedWorld[remoteId]; delete visibleWorld[remoteId]; delete moveState[remoteId]; delete remoteRenderState[remoteId]; delete hitFlashes[remoteId]; confirmedSeq.delete(remoteId); confirmedEventSeq.delete(remoteId); simulationStateHistory.delete(remoteId); tickAnchors.delete(remoteId); activityAnchors.delete(remoteId); prePeerIce.delete(remoteId); bootstrapAckPeers.delete(remoteId); bootstrapPendingSince.delete(remoteId);
+        delete confirmedWorld[remoteId]; delete visibleWorld[remoteId]; delete moveState[remoteId]; delete remoteRenderState[remoteId]; delete hitFlashes[remoteId]; confirmedSeq.delete(remoteId); confirmedEventSeq.delete(remoteId); simulationStateHistory.delete(remoteId); tickAnchors.delete(remoteId); activityAnchors.delete(remoteId); prePeerIce.delete(remoteId); bootstrapAckPeers.delete(remoteId); bootstrapPendingSince.delete(remoteId); bootstrapAckState.delete(remoteId); bootstrapCommandBacklog.delete(remoteId);
         for(const [id,pending] of [...pendingById]) if(pending.command.playerId===remoteId){ clearTimeout(pending.timeoutId); pendingById.delete(id); }
         pendingOrderByPlayer.delete(remoteId); pendingEventOrderByPlayer.delete(remoteId);
         if(!pageUnloading){ if(wasMember) refreshMembership('peer removed'); updatePeerList(); log('t-sys',`peer removed ↔ ${remoteId} (${reason})`); }

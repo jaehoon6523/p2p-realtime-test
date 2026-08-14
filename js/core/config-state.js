@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r16';
+const RULESET_REVISION = 'pssf-v13-r17';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
@@ -141,7 +141,9 @@ const bullets = []; // optimistic projectile trails; never authoritative damage
 const optimisticEffects = new Map(); // commandId -> {kind,status,createdAt,...}; UX/correction only
 const botTelegraphs = new Map();
 const bootstrapAckPeers = new Set();
-const bootstrapPendingSince = new Map(); // optional server-bot prefire hints; never gameplay authority
+const bootstrapPendingSince = new Map(); // peer -> last bootstrap send time
+const bootstrapAckState = new Map(); // peer -> {sequence,eventSequence}
+const bootstrapCommandBacklog = new Map(); // peer -> ordered local commands waiting for bootstrap ACK
 const hitFlashes = Object.create(null);
 const pendingById = new Map();
 const pendingOrderByPlayer = new Map(); // simulation stream
