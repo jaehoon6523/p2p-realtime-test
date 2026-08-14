@@ -24,6 +24,7 @@ vm.createContext(context);
 
 const root=path.join(__dirname,'..','js');
 for(const file of [
+  'game/ability-definitions.js',
   'core/config-state.js',
   'core/membership-topology.js',
   'game/ruleset.js',
@@ -87,7 +88,7 @@ vm.runInContext(`
   const base={...confirmedWorld[myId]};
   localEventSequence=1;
   const checkpoint=[{playerId:myId,x:base.x,y:base.y,alive:true,lifeId:base.lifeId,sequence:base.sequence,tick:base.tick}];
-  const shootReleaseTick=currentTick()+6; const shoot={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,stream:'event',type:'shoot',abilityId:'basic_attack',abilitySeq:1,castStartTick:currentTick(),previousAbilityRef:null,previousSameAbilityRef:null,commandId:'shoot-e1',playerId:myId,eventSeq:1,simulationRef:{sequence:base.sequence,stateHash:simulationRefHash(base)},tick:shootReleaseTick,topologyEpoch:2,assignmentId:'self-a2',aoiRadius:AOI_RADIUS,aimX:1,aimY:0,checkpoint,checkpointHash:stableHash(checkpoint),claimedHitId:null,claimedHitLifeId:null};
+  const shootReleaseTick=currentTick(); const shoot={protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,stream:'event',type:'shoot',abilityId:'basic_attack',abilitySeq:1,castStartTick:shootReleaseTick,previousAbilityRef:null,previousSameAbilityRef:null,commandId:'shoot-e1',playerId:myId,eventSeq:1,simulationRef:{sequence:base.sequence,stateHash:simulationRefHash(base)},tick:shootReleaseTick,topologyEpoch:2,assignmentId:'self-a2',aoiRadius:AOI_RADIUS,aimX:1,aimY:0,checkpoint,checkpointHash:stableHash(checkpoint),claimedHitId:null,claimedHitLifeId:null};
   ingestCommand(shoot,false);
   if(!pendingAtEventSequence(myId,1)||pendingAtEventSequence(myId,1).verdict) throw new Error('shoot did not remain independently pending');
   if((confirmedEventSeq.get(myId)||0)!==0) throw new Error('pending shoot prematurely advanced event stream');
@@ -123,13 +124,14 @@ vm.runInContext(`
   // r9 ability consensus: validators independently enforce cast, recovery and cooldown lineage.
   finalizedAbilityHistory.delete('abilityActor'); pendingAbilityTerminals.delete('abilityActor'); confirmedAbilitySeq.set('abilityActor',0);
   const mkAbility=(abilityId,abilitySeq,castStartTick,releaseTick,prev=null,prevSame=null)=>({playerId:'abilityActor',abilityId,abilitySeq,castStartTick,tick:releaseTick,previousAbilityRef:prev,previousSameAbilityRef:prevSame});
-  const q1=mkAbility('basic_attack',1,100,106,null,null);
+  const q1=mkAbility('basic_attack',1,100,100,null,null);
   let ar=evaluateAbilityContract(q1); if(ar.disposition!==RULE_DISPOSITION.ACCEPT) throw new Error('valid Q timing rejected '+JSON.stringify(ar));
-  const q1rec={abilitySeq:1,abilityId:'basic_attack',castStartTick:100,releaseTick:106,abilityHash:abilityEvidenceHash(q1),disposition:'ACCEPTED',commandId:'q1'};
+  ar=evaluateAbilityContract(mkAbility('basic_attack',1,100,101,null,null)); if(ar.code!=='ABILITY_CAST_TOO_LATE') throw new Error('Q was not enforced as instant '+JSON.stringify(ar));
+  const q1rec={abilitySeq:1,abilityId:'basic_attack',castStartTick:100,releaseTick:100,abilityHash:abilityEvidenceHash(q1),disposition:'ACCEPTED',commandId:'q1'};
   abilityHistoryFor('abilityActor').set(1,q1rec); confirmedAbilitySeq.set('abilityActor',1);
-  const q1ref={abilitySeq:1,abilityId:'basic_attack',castStartTick:100,releaseTick:106,abilityHash:q1rec.abilityHash};
-  ar=evaluateAbilityContract(mkAbility('long_shot',2,108,114,q1ref,null)); if(ar.code!=='ABILITY_RECOVERY_LOCK') throw new Error('recovery lock not verified '+JSON.stringify(ar));
-  ar=evaluateAbilityContract(mkAbility('basic_attack',2,112,118,q1ref,q1ref)); if(ar.code!=='ABILITY_COOLDOWN') throw new Error('Q cooldown not verified '+JSON.stringify(ar));
+  const q1ref={abilitySeq:1,abilityId:'basic_attack',castStartTick:100,releaseTick:100,abilityHash:q1rec.abilityHash};
+  ar=evaluateAbilityContract(mkAbility('long_shot',2,104,110,q1ref,null)); if(ar.code!=='ABILITY_RECOVERY_LOCK') throw new Error('recovery lock not verified '+JSON.stringify(ar));
+  ar=evaluateAbilityContract(mkAbility('basic_attack',2,112,112,q1ref,q1ref)); if(ar.code!=='ABILITY_COOLDOWN') throw new Error('Q cooldown not verified '+JSON.stringify(ar));
   ar=evaluateAbilityContract(mkAbility('long_shot',2,112,113,q1ref,null)); if(ar.code!=='ABILITY_CAST_TOO_FAST') throw new Error('cast delay not verified '+JSON.stringify(ar));
   ar=evaluateAbilityContract(mkAbility('long_shot',2,112,118,q1ref,null)); if(ar.disposition!==RULE_DISPOSITION.ACCEPT) throw new Error('valid W lineage rejected '+JSON.stringify(ar));
 

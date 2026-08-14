@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r10';
+const RULESET_REVISION = 'pssf-v13-r11';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
@@ -54,14 +54,9 @@ const MAX_PENDING_SHOOTS = 4;
 const OPTIMISTIC_REJECT_FADE_MS = 90;
 const OPTIMISTIC_CONFIRM_FADE_MS = 160; // visual-only prediction; shared HP/death remains certificate-gated
 
-// Ability runtime contract. TODO: load the same fields from XML Ability/Component definitions.
-const ABILITY_DEFINITIONS = Object.freeze({
-    Q:Object.freeze({id:'basic_attack',key:'Q',kind:'shoot',cooldownMs:500,castMs:200,recoveryMs:200,range:230}),
-    W:Object.freeze({id:'long_shot',key:'W',kind:'shoot',cooldownMs:2000,castMs:200,recoveryMs:200,range:460}),
-    E:Object.freeze({id:'dash',key:'E',kind:'dash',cooldownMs:3000,castMs:200,recoveryMs:200,distance:150}),
-});
-const ABILITY_BY_ID = Object.freeze(Object.fromEntries(Object.values(ABILITY_DEFINITIONS).map(v=>[v.id,v])));
-function abilityTicks(ms){ return Math.max(1,Math.round(ms/TICK_MS)); }
+// Ability data lives in js/game/ability-definitions.js and is loaded before this runtime state.
+// Timing conversion is shared by local prediction and deterministic validator replay.
+function abilityTicks(ms){ return Math.max(0,Math.round(ms/TICK_MS)); }
 function abilityTimingFor(ability){ return {cooldownTicks:abilityTicks(ability.cooldownMs),castTicks:abilityTicks(ability.castMs),recoveryTicks:abilityTicks(ability.recoveryMs)}; }
 const MAX_COMBAT_RANGE = Math.max(...Object.values(ABILITY_DEFINITIONS).filter(v=>v.kind==='shoot').map(v=>v.range));
 const DASH_DISTANCE = ABILITY_DEFINITIONS.E.distance;

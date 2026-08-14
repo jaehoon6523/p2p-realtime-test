@@ -22,7 +22,7 @@ const refs = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map(m=>m[1]);
 if(!refs.length) throw new Error('hardened entrypoint does not reference split runtime');
 for(const ref of refs){ if(/^https?:/.test(ref)) continue; must(ref); }
 for(const rel of [
-  'js/core/command-factory.js','js/core/disposition.js','js/core/event-stream.js','js/core/verification.js'
+  'js/game/ability-definitions.js','js/core/command-factory.js','js/core/disposition.js','js/core/event-stream.js','js/core/verification.js'
 ]) if(!refs.includes(rel)) throw new Error(`hardened entrypoint missing split module: ${rel}`);
 if(refs.includes('js/core/pssf-kernel.js')) throw new Error('legacy pssf-kernel.js reference remained');
 
@@ -69,16 +69,19 @@ if(autoBrain.includes("hasPendingType(myId,'shoot')")) throw new Error('AUTO sti
 const bootstrap = fs.readFileSync(must('js/core/bootstrap.js'),'utf8');
 if(!bootstrap.includes('requestAnimationFrame(draw);')) throw new Error('render loop bootstrap missing');
 
+const abilityData = fs.readFileSync(must('js/game/ability-definitions.js'),'utf8');
 const config = fs.readFileSync(must('js/core/config-state.js'),'utf8');
 const server = fs.readFileSync(must('mmo-server/signaling-server.js'),'utf8');
 if(!config.includes('const MAX_PENDING_SHOOTS = 4;')) throw new Error('shoot concurrency cap missing');
-for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r10';"]){
+for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r11';"]){
   if(!config.includes(expected)) throw new Error(`client missing ${expected}`);
   if(!server.includes(expected)) throw new Error(`server missing ${expected}`);
 }
-if(!config.includes("Q:Object.freeze({id:'basic_attack'")) throw new Error('Q ability definition missing');
-if(!config.includes("W:Object.freeze({id:'long_shot'")) throw new Error('W ability definition missing');
-if(!config.includes("E:Object.freeze({id:'dash'")) throw new Error('E ability definition missing');
+if(!abilityData.includes("Q:Object.freeze({id:'basic_attack',key:'Q',kind:'shoot',cooldownMs:500,castMs:0,recoveryMs:200,range:230})")) throw new Error('Q instant ability data missing');
+if(!abilityData.includes("W:Object.freeze({id:'long_shot',key:'W',kind:'shoot',cooldownMs:2000,castMs:200,recoveryMs:200,range:460})")) throw new Error('W ability data missing');
+if(!abilityData.includes("E:Object.freeze({id:'dash',key:'E',kind:'dash',cooldownMs:3000,castMs:200,recoveryMs:200,distance:150})")) throw new Error('E ability data missing');
+if(config.includes('const ABILITY_DEFINITIONS')) throw new Error('ability data duplicated in config-state');
+if(!readme.includes('js/game/ability-definitions.js')) throw new Error('README missing canonical ability data location');
 const input = fs.readFileSync(must('js/ui/input.js'),'utf8');
 if(input.includes("canvas.addEventListener('click'")) throw new Error('left click attack handler still present');
 if(!input.includes('tryCastAbility(key)')) throw new Error('Q/W/E ability input missing');

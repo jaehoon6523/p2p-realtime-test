@@ -32,20 +32,23 @@ function tryCastAbility(key){
     localAbilityReadyAt.set(ability.id,now+ability.cooldownMs);
     localAbilityLockUntil=now+ability.castMs;
     log('t-cmd',`ABILITY_CAST key=${ability.key} ability=${ability.id} cast=${ability.castMs}ms cooldown=${ability.cooldownMs}ms`);
-    setTimeout(()=>{
+    const release=()=>{
         if(!roomReady) return abilitySuppressed(ability,'ROOM_NOT_READY_AFTER_CAST');
         flushActiveMoveToNow();
         const current=getPredictedTail(myId);
         if(!current?.alive) return abilitySuppressed(ability,'DEAD_DURING_CAST');
+        const releaseCastStartTick=ability.castMs===0?currentTick():castStartTick;
         let command=null;
-        if(ability.kind==='shoot') command=makeShootCommand(aim.x,aim.y,ability.id,castStartTick);
-        else if(ability.kind==='dash') command=makeDashCommand(aim.x,aim.y,castStartTick);
+        if(ability.kind==='shoot') command=makeShootCommand(aim.x,aim.y,ability.id,releaseCastStartTick);
+        else if(ability.kind==='dash') command=makeDashCommand(aim.x,aim.y,releaseCastStartTick);
         if(command){
             executeLocal(command);
             log('t-cmd',`ABILITY_RELEASE key=${ability.key} ability=${ability.id} ${commandSequenceText(command)}`);
         }else abilitySuppressed(ability,'COMMAND_NOT_CREATED');
         localAbilityLockUntil=Math.max(localAbilityLockUntil,performance.now()+ability.recoveryMs);
-    },ability.castMs);
+    };
+    if(ability.castMs===0) release();
+    else setTimeout(release,ability.castMs);
 }
 
 canvas.addEventListener('pointermove',event=>{ lastAimWorld=screenToWorld(event.clientX,event.clientY); });

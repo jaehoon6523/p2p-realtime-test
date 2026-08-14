@@ -74,8 +74,9 @@ function evaluateAbilityContract(command){
     if(!ability) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_UNKNOWN',reason:`unknown ability ${command.abilityId}`,computed:null,advanceTick:false};
     const timing=abilityTimingFor(ability);
     const castTicks=command.tick-command.castStartTick;
-    if(castTicks<Math.max(1,timing.castTicks-1)) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_CAST_TOO_FAST',reason:`cast ticks=${castTicks} required~${timing.castTicks}`,computed:{castTicks,timing},advanceTick:false};
-    if(castTicks>timing.castTicks+6) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_CAST_TOO_LATE',reason:`cast ticks=${castTicks} expected~${timing.castTicks}`,computed:{castTicks,timing},advanceTick:false};
+    if(timing.castTicks===0&&castTicks!==0) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_CAST_TOO_LATE',reason:`instant ability requires cast ticks=0 got=${castTicks}`,computed:{castTicks,timing},advanceTick:false};
+    if(timing.castTicks>0&&castTicks<Math.max(1,timing.castTicks-1)) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_CAST_TOO_FAST',reason:`cast ticks=${castTicks} required~${timing.castTicks}`,computed:{castTicks,timing},advanceTick:false};
+    if(timing.castTicks>0&&castTicks>timing.castTicks+6) return {disposition:RULE_DISPOSITION.REJECT,code:'ABILITY_CAST_TOO_LATE',reason:`cast ticks=${castTicks} expected~${timing.castTicks}`,computed:{castTicks,timing},advanceTick:false};
 
     const known=confirmedAbilitySeq.get(command.playerId)||0;
     if(command.abilitySeq>known+1) return {disposition:RULE_DISPOSITION.DEFER,code:'ABILITY_LINEAGE_PENDING',reason:`waiting abilitySeq=${known+1} before ${command.abilitySeq}`,retryMs:Math.max(TEMPORAL_RETRY_MIN_MS,60),computed:{known},advanceTick:false};

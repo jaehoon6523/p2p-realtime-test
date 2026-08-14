@@ -33,7 +33,7 @@ p2p-realtime-test/
 
 - game protocol: **13**
 - signaling protocol: **5**
-- ruleset: **pssf-v13-r10**
+- ruleset: **pssf-v13-r11**
 - server-assigned actor policy: `assignmentId / topologyEpoch / validatorIds / quorum`
 - simulation stream (`move/heal/respawn`): actor state sequence + deterministic dependency chain
 - shoot event stream: independent `eventSeq` + `simulationRef(sequence,stateHash)` + aim vector
@@ -142,7 +142,7 @@ Runtime 탭의 상단은 현재 상태 판단용 지표만 표시합니다.
 
 
 
-## Optimistic UX / authoritative correction (r10)
+## Optimistic UX / authoritative correction (r11)
 
 The local client predicts only effects that are cheap to correct:
 
@@ -157,7 +157,7 @@ This deliberately keeps correction cheap: visual/projected motion may be correct
 
 ## Ability controls (r9)
 
-- `Q` basic attack: range 230, cooldown 0.5s, cast 0.2s, recovery 0.2s.
+- `Q` basic attack: range 230, cooldown 0.5s, cast **0s (instant)**, recovery 0.2s.
 - `W` long shot: range 460, cooldown 2s, cast 0.2s, recovery 0.2s.
 - `E` dash: distance 150, cooldown 3s, cast 0.2s, recovery 0.2s.
 - Mouse position supplies aim. Right click remains destination movement. Left click no longer attacks.
@@ -193,3 +193,17 @@ Runtime values currently live in `ABILITY_DEFINITIONS`. The intended next refact
   <Movement type="Dash" distance="150"/>
 </Ability>
 ```
+
+### Ability data location
+
+Canonical Q/W/E gameplay values live in **`js/game/ability-definitions.js`**. Runtime input, command construction, validator timing/range checks, AUTO behavior, and tests all read `ABILITY_DEFINITIONS` / `ABILITY_BY_ID` from this file. Do not duplicate cooldown/cast/recovery/range/distance numbers in validator code.
+
+Current values:
+
+```text
+Q basic_attack: cast 0ms, recovery 200ms, cooldown 500ms, range 230
+W long_shot:    cast 200ms, recovery 200ms, cooldown 2000ms, range 460
+E dash:         cast 200ms, recovery 200ms, cooldown 3000ms, distance 150
+```
+
+TODO(XML): replace `ability-definitions.js` as the data source with the planned XML Ability/Component loader while preserving the same immutable runtime shape.
