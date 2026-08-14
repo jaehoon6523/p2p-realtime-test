@@ -3,7 +3,7 @@
 const fs=require('fs');
 const path=require('path');
 const root=path.join(__dirname,'..');
-const rev='pssf-v13-r21';
+const rev='pssf-v13-r22';
 for(const name of ['p2p-mmo-demo-hardened.html','p2p-mmo-demo-auto.html']){
   const html=fs.readFileSync(path.join(root,name),'utf8');
   const scripts=[...html.matchAll(/<script src="([^"]+\.js\?v=[^"]+)"><\/script>/g)].map(m=>m[1]);

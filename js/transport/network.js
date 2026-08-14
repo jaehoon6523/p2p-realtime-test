@@ -219,6 +219,7 @@ window.reconnectSignaling=reconnectSignaling;
 let directMeshRepairTimer=null;
 const DIRECT_MESH_REPAIR_MS=1200;
 const DIRECT_CONNECT_STALE_MS=5000;
+const DIRECT_CHANNEL_STALE_MS=2500;
 function startDirectMeshRepair(){
     if(directMeshRepairTimer) return;
     directMeshRepairTimer=setInterval(repairDesiredDirectMesh,DIRECT_MESH_REPAIR_MS);
@@ -230,9 +231,13 @@ function peerNeedsDirectRepair(remoteId){
     if(isPeerOpen(remoteId)) return false;
     if(!peer.pc) return myId<remoteId;
     const state=peer.pc.connectionState;
-    if(state==='failed'||state==='closed') return true;
+    const dcState=peer.dc?.readyState||'missing';
+    if(state==='failed'||state==='closed'||dcState==='closed'||dcState==='closing') return true;
     const age=performance.now()-(peer.connectStartedAt||performance.now());
-    return myId<remoteId && age>=DIRECT_CONNECT_STALE_MS && state!=='connected';
+    // RTCPeerConnection.connected is not sufficient. The game transport is the DataChannel.
+    // If ICE/DTLS connected but the negotiated channel never opens, recreate the edge.
+    if(state==='connected'&&dcState!=='open') return myId<remoteId && age>=DIRECT_CHANNEL_STALE_MS;
+    return myId<remoteId && age>=DIRECT_CONNECT_STALE_MS;
 }
 async function repairDesiredDirectMesh(){
     if(pageUnloading||!roomReady) return;
@@ -241,7 +246,7 @@ async function repairDesiredDirectMesh(){
         const existing=peers.get(remoteId);
         if(existing) removePeer(remoteId,'direct mesh repair');
         if(myId<remoteId){
-            signalLog('t-sig',`DIRECT_MESH_REPAIR offer→${remoteId}`);
+            signalLog('t-sig',`DIRECT_MESH_REPAIR offer→${remoteId} pc=${existing?.pc?.connectionState||'-'} dc=${existing?.dc?.readyState||'missing'}`);
             try{ await createPeer(remoteId,true); }catch(error){ signalLog('t-err',`direct mesh repair failed peer=${remoteId}: ${error.message}`); }
         }else if(!peers.has(remoteId)){
             peers.set(remoteId,{transport:'webrtc',pc:null,dc:null,state:'awaiting-offer',remoteId,pendingIce:[...(prePeerIce.get(remoteId)||[])],connectStartedAt:performance.now()});

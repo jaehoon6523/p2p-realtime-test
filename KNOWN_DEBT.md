@@ -74,5 +74,3 @@
 ## r19 movement single-source state machine
 
 The local movement plan no longer caches an incremental protocol position. `getPredictedTail(myId)` is the only command-generation position authority. Future movement features must not reintroduce a second mutable sample cursor.
-
-- r21 removed the ACK-gated bootstrap command backlog because it created a liveness deadlock when ACK was absent; bootstrap control remains reliable/ordered transport state and ACK is health telemetry only.

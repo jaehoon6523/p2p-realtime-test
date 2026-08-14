@@ -1,3 +1,5 @@
+
+- r22: Q/W shooting no longer flushes or cancels click-movement; dash replaces click-movement. Direct-mesh health is now DataChannel-open based, not RTCPeerConnection.connected based.
 # PSSF Render deploy
 
 기존 Render 서비스 경로를 유지합니다.
@@ -33,7 +35,7 @@ https://jaehoon6523.github.io/p2p-realtime-test/p2p-mmo-demo-hardened.html?signa
 
 ## Browser asset version pin
 
-- Expected build/ruleset: `pssf-v13-r21`
-- Demo HTML script URLs are pinned with `?v=pssf-v13-r21`.
-- Public test URLs should include `&build=pssf-v13-r21` so the HTML document itself also gets a distinct cache key.
-- After deploy, reject any browser log whose `local peer boot` line is not `ruleset=pssf-v13-r21`.
+- Expected build/ruleset: `pssf-v13-r22`
+- Demo HTML script URLs are pinned with `?v=pssf-v13-r22`.
+- Public test URLs should include `&build=pssf-v13-r22` so the HTML document itself also gets a distinct cache key.
+- After deploy, reject any browser log whose `local peer boot` line is not `ruleset=pssf-v13-r22`.

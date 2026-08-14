@@ -26,21 +26,29 @@ function tryCastAbility(key,{aimPoint=null,source='INPUT'}={}){
     const readyAt=localAbilityReadyAt.get(ability.id)||0;
     if(now<readyAt){ abilitySuppressed(ability,'COOLDOWN',`remaining=${Math.ceil(readyAt-now)}ms`); return; }
     if(now<localAbilityLockUntil){ abilitySuppressed(ability,'ACTION_LOCK',`remaining=${Math.ceil(localAbilityLockUntil-now)}ms`); return; }
-    const aim=aimVectorFromWorld(me,aimPoint||lastAimWorld);
-    if(!aim){ abilitySuppressed(ability,'INVALID_AIM'); return; }
+    const fixedAimPoint=aimPoint?{x:aimPoint.x,y:aimPoint.y}:null;
+    const initialAim=aimVectorFromWorld(me,fixedAimPoint||lastAimWorld);
+    if(!initialAim){ abilitySuppressed(ability,'INVALID_AIM'); return; }
 
     localAbilityReadyAt.set(ability.id,now+ability.cooldownMs);
     localAbilityLockUntil=now+ability.castMs;
     log('t-cmd',`ABILITY_CAST source=${source} key=${ability.key} ability=${ability.id} cast=${ability.castMs}ms cooldown=${ability.cooldownMs}ms`);
     const release=()=>{
         if(!roomReady) return abilitySuppressed(ability,'ROOM_NOT_READY_AFTER_CAST');
-        flushActiveMoveToNow();
+        // Shoot/event abilities are orthogonal to movement. Never flush, cancel, or rewrite the
+        // active movement plan merely to fire. Dash is a simulation movement ability and replaces it.
+        if(ability.kind==='dash'){
+            flushActiveMoveToNow();
+            delete moveState[myId];
+        }
         const current=getPredictedTail(myId);
         if(!current?.alive) return abilitySuppressed(ability,'DEAD_DURING_CAST');
+        const releaseAim=aimVectorFromWorld(current,fixedAimPoint||lastAimWorld);
+        if(!releaseAim) return abilitySuppressed(ability,'INVALID_AIM_AT_RELEASE');
         const releaseCastStartTick=ability.castMs===0?currentTick():castStartTick;
         let command=null;
-        if(ability.kind==='shoot') command=makeShootCommand(aim.x,aim.y,ability.id,releaseCastStartTick);
-        else if(ability.kind==='dash') command=makeDashCommand(aim.x,aim.y,releaseCastStartTick);
+        if(ability.kind==='shoot') command=makeShootCommand(releaseAim.x,releaseAim.y,ability.id,releaseCastStartTick);
+        else if(ability.kind==='dash') command=makeDashCommand(releaseAim.x,releaseAim.y,releaseCastStartTick);
         if(command){
             executeLocal(command);
             log('t-cmd',`ABILITY_RELEASE source=${source} key=${ability.key} ability=${ability.id} ${commandSequenceText(command)}`);
