@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r27';
+const RULESET_REVISION = 'pssf-v13-r28';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
@@ -112,7 +112,7 @@ const simulationStateHistory = new Map(); // playerId -> Map(simulation seq -> s
 const tickAnchors = new Map();
 const activityAnchors = new Map();
 const moveState = Object.create(null); // local destination plan only; never owns velocity
-const localMoveVelocity = {vx:0,vy:0,lastStepAt:performance.now()}; // persistent local physics state
+const localMoveVelocity = {vx:0,vy:0,lastStepAt:performance.now(),cruiseSpeed:0,heading:0}; // persistent local physics state + pre-brake chain speed
 const POSITION_TRACE_INTERVAL_MS=100;
 const POSITION_TRACE_DIVERGENCE_WARN=1.5;
 let lastPositionTraceAt=0;
@@ -157,6 +157,8 @@ const deferredCommands = new Map();
 const temporalRetryTimers = new Map();
 const finalizedEventHistory = new Map(); // simulation stream: playerId -> Map(sequence -> disposition)
 const finalizedCombatEventHistory = new Map(); // event stream: playerId -> Map(eventSeq -> disposition)
+const prefixRepairState = new Map(); // playerId -> last installed prefix signature / mismatch counters
+const rebaseRequestState = new Map(); // throttles + quorum votes for explicit canonical rebase requests
 const seenCommandIds = new Set();
 const seenCommandFingerprintById = new Map(); // commandId -> first observed event fingerprint
 const seenCommandQueue = [];

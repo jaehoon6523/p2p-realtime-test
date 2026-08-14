@@ -74,3 +74,6 @@
 ## r19 movement single-source state machine
 
 The local movement plan no longer caches an incremental protocol position. `getPredictedTail(myId)` is the only command-generation position authority. Future movement features must not reintroduce a second mutable sample cursor.
+
+## r28 note
+The r27 browser runtime exposed a missing shared-state declaration (`prefixRepairState`, with `rebaseRequestState` also undeclared). r28 adds declarations and a runtime-state contract test. Signaling close code 1006 remains an external/reconnect condition rather than a protocol-fault classification.

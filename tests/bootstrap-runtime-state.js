@@ -25,7 +25,7 @@ if(compactStart<0||importStart<0||sendStart<0||sendEnd<0) throw new Error('boots
 
 const c={
   SNAPSHOT_HISTORY_TAIL_SEQUENCES,HISTORY_REPAIR_MAX_STATES,
-  PROTOCOL:13,RULESET_REVISION:'pssf-v13-r27',myId:'me',AUTO_MODE:false,
+  PROTOCOL:13,RULESET_REVISION:'pssf-v13-r28',myId:'me',AUTO_MODE:false,
   simulationStateHistory:new Map(),confirmedWorld:Object.create(null),confirmedEventSeq:new Map(),confirmedAbilitySeq:new Map(),
   bootstrapSentPeers:new Set(),bootstrapPendingSince:new Map(),
   performance:{now:()=>1234},currentTick:()=>99,

@@ -93,19 +93,34 @@ function clampVectorDelta(dx,dy,maxMagnitude){
 // Velocity is persistent physics state, not part of a destination plan.
 // Retargeting replaces only moveState[myId].target*. It never creates or assigns a new speed.
 function readLocalMoveVelocity(){
+    const vx=Number.isFinite(localMoveVelocity.vx)?localMoveVelocity.vx:0;
+    const vy=Number.isFinite(localMoveVelocity.vy)?localMoveVelocity.vy:0;
+    const speed=Math.hypot(vx,vy);
     return {
-        vx:Number.isFinite(localMoveVelocity.vx)?localMoveVelocity.vx:0,
-        vy:Number.isFinite(localMoveVelocity.vy)?localMoveVelocity.vy:0,
+        vx,vy,
         lastStepAt:Number.isFinite(localMoveVelocity.lastStepAt)?localMoveVelocity.lastStepAt:performance.now(),
+        cruiseSpeed:Number.isFinite(localMoveVelocity.cruiseSpeed)?Math.max(speed,localMoveVelocity.cruiseSpeed):speed,
+        heading:Number.isFinite(localMoveVelocity.heading)?localMoveVelocity.heading:(speed>1e-9?Math.atan2(vy,vx):0),
     };
 }
 function writeLocalMoveVelocity(vx,vy,now=performance.now()){
-    localMoveVelocity.vx=Number.isFinite(vx)?vx:0;
-    localMoveVelocity.vy=Number.isFinite(vy)?vy:0;
+    const nextVx=Number.isFinite(vx)?vx:0;
+    const nextVy=Number.isFinite(vy)?vy:0;
+    const speed=Math.hypot(nextVx,nextVy);
+    localMoveVelocity.vx=nextVx;
+    localMoveVelocity.vy=nextVy;
     localMoveVelocity.lastStepAt=now;
+    if(speed>1e-9) localMoveVelocity.heading=Math.atan2(nextVy,nextVx);
+    // Braking near a destination must not erase the speed already earned by the active click-move chain.
+    // A retarget can therefore cancel destination braking without granting speed above the chain's prior peak.
+    localMoveVelocity.cruiseSpeed=Math.min(MOVE_SPEED,Math.max(Number(localMoveVelocity.cruiseSpeed)||0,speed));
 }
 function resetLocalMoveVelocity(now=performance.now()){
-    writeLocalMoveVelocity(0,0,now);
+    localMoveVelocity.vx=0;
+    localMoveVelocity.vy=0;
+    localMoveVelocity.lastStepAt=now;
+    localMoveVelocity.cruiseSpeed=0;
+    localMoveVelocity.heading=0;
 }
 function stopLocalMovement({resetVelocity=true,now=performance.now()}={}){
     delete moveState[myId];
@@ -260,7 +275,14 @@ function startMove(playerId,fromX,fromY,toX,toY,options={}){
         writeLocalMoveVelocity(explicit.vx,explicit.vy,now);
     }else if(previous){
         const velocity=readLocalMoveVelocity();
-        writeLocalMoveVelocity(velocity.vx,velocity.vy,now);
+        const speed=Math.hypot(velocity.vx,velocity.vy);
+        const chainSpeed=Math.min(MOVE_SPEED,Math.max(speed,velocity.cruiseSpeed||0));
+        if(chainSpeed>speed+1e-9){
+            const heading=speed>1e-9?Math.atan2(velocity.vy,velocity.vx):velocity.heading;
+            writeLocalMoveVelocity(Math.cos(heading)*chainSpeed,Math.sin(heading)*chainSpeed,now);
+        }else{
+            writeLocalMoveVelocity(velocity.vx,velocity.vy,now);
+        }
     }else{
         resetLocalMoveVelocity(now);
     }
@@ -275,7 +297,7 @@ function startMove(playerId,fromX,fromY,toX,toY,options={}){
         hardStopAt:now+MOVE_MAX_DURATION,lastWallAt:now
     };
     const velocity=readLocalMoveVelocity();
-    tracePosition('retarget:armed',{force:true,now,extra:`start=${startX.toFixed(2)},${startY.toFixed(2)} vel=${velocity.vx.toFixed(1)},${velocity.vy.toFixed(1)} speed=${Math.hypot(velocity.vx,velocity.vy).toFixed(2)} dist=${distance.toFixed(2)}`});
+    tracePosition('retarget:armed',{force:true,now,extra:`start=${startX.toFixed(2)},${startY.toFixed(2)} vel=${velocity.vx.toFixed(1)},${velocity.vy.toFixed(1)} speed=${Math.hypot(velocity.vx,velocity.vy).toFixed(2)} cruise=${velocity.cruiseSpeed.toFixed(2)} dist=${distance.toFixed(2)}`});
 }
 function rebaseLocalMovementAfterRejection(sequence,reason){
     const movement=moveState[myId];

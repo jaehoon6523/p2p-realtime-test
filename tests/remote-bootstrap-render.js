@@ -16,7 +16,7 @@ for(;i<sim.length;i++){
 }
 const fn=sim.slice(start,i);
 const c={
- PROTOCOL:13,RULESET_REVISION:'pssf-v13-r27',MAX_HP:3,AUTO_MODE:false,
+ PROTOCOL:13,RULESET_REVISION:'pssf-v13-r28',MAX_HP:3,AUTO_MODE:false,
  confirmedWorld:Object.create(null),visibleWorld:Object.create(null),
  confirmedSeq:new Map(),confirmedEventSeq:new Map(),confirmedAbilitySeq:new Map(),tickAnchors:new Map(),activityAnchors:new Map(),
  relayWorld:new Map(),performance:{now:()=>2000},rendered:null,acked:false,logs:[],
@@ -28,7 +28,7 @@ c.stateHash=()=> 'hash';c.sendInstalledBootstrapAck=()=>{c.acked=true;return tru
 c.log=(cls,msg)=>c.logs.push({cls,msg});c.setTimeout=()=>{};
 vm.createContext(c);
 vm.runInContext(fn+'\nthis.receive=receiveSnapshot;',c);
-c.receive('peer',{protocol:13,rulesetRevision:'pssf-v13-r27',senderId:'peer',clockTick:12,eventSequence:0,abilityCheckpoint:{confirmedAbilitySeq:5},
+c.receive('peer',{protocol:13,rulesetRevision:'pssf-v13-r28',senderId:'peer',clockTick:12,eventSequence:0,abilityCheckpoint:{confirmedAbilitySeq:5},
  state:{x:100,y:200,sequence:4,tick:12,hp:3,alive:true,lifeId:1,color:'#fff'},historyTail:[],bootstrap:true});
 if(!c.confirmedWorld.peer||!c.visibleWorld.peer) throw new Error('remote snapshot did not install world state');
 if(!c.rendered||c.rendered.id!=='peer'||c.rendered.opt?.snap!==true) throw new Error('remote render target was not initialized');

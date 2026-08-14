@@ -75,7 +75,7 @@ const abilityData = fs.readFileSync(must('js/game/ability-definitions.js'),'utf8
 const config = fs.readFileSync(must('js/core/config-state.js'),'utf8');
 const server = fs.readFileSync(must('mmo-server/signaling-server.js'),'utf8');
 if(!config.includes('const MAX_PENDING_SHOOTS = 4;')) throw new Error('shoot concurrency cap missing');
-for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r27';"]){
+for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r28';"]){
   if(!config.includes(expected)) throw new Error(`client missing ${expected}`);
   if(!server.includes(expected)) throw new Error(`server missing ${expected}`);
 }

@@ -9,7 +9,7 @@ const context={
   console,Map,Set,Date,Math,JSON,String,Number,Object,Array,command,
   performance:{now:()=>1000},
   setInterval:()=>0,clearInterval:()=>{},setTimeout:()=>0,clearTimeout:()=>{},
-  PROTOCOL:13,RULESET_REVISION:'pssf-v13-r27',AUTO_DEBUG:true,TEMPORAL_RETRY_MIN_MS:40,
+  PROTOCOL:13,RULESET_REVISION:'pssf-v13-r28',AUTO_DEBUG:true,TEMPORAL_RETRY_MIN_MS:40,
   RULE_DISPOSITION:{ACCEPT:'ACCEPT',REJECT:'REJECT',DEFER:'DEFER',RESYNC:'RESYNC',FAULT:'FAULT'},
   pendingById:new Map([[command.commandId,{command,verdict:null}]]),
   evaluateCommand:(cmd,pending,opts)=>{

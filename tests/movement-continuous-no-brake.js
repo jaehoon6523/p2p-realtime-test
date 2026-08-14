@@ -13,7 +13,7 @@ let now=1000;
 const c={
   BASE_MAX_STEP:75,MOVE_DECEL:560,MOVE_ACCEL:620,MOVE_SPEED:220,
   MOVE_STEER_RATE:Math.PI*2.2,MOVE_RETARGET_BRAKE_GRACE_MS:320,MOVE_MAX_DURATION:8000,
-  myId:'me',moveState:Object.create(null),localMoveVelocity:{vx:220,vy:0,lastStepAt:1000},
+  myId:'me',moveState:Object.create(null),localMoveVelocity:{vx:220,vy:0,lastStepAt:1000,cruiseSpeed:220,heading:0},
   performance:{now:()=>now},predicted:{x:500,y:300,alive:true,sequence:10},
   confirmedWorld:{me:{x:500,y:300,alive:true}},localCommandBackpressured:()=>false,traces:[]
 };
@@ -32,6 +32,20 @@ now=1050;
 c.startMoveFn('me',500,300,200,300);
 if(Math.abs(c.localMoveVelocity.vx-before.vx)>1e-9||Math.abs(c.localMoveVelocity.vy-before.vy)>1e-9)
   throw new Error('retarget changed velocity immediately');
+
+// If destination braking has already started but the plan is still active, a new click cancels that
+// braking and restores the speed earned by this continuous movement chain.
+c.moveState.me={startX:400,startY:300,targetX:520,targetY:300,retargetAt:100,hardStopAt:9000,lastWallAt:100};
+c.predicted={...c.predicted,x:505,y:300};
+c.localMoveVelocity.vx=220;c.localMoveVelocity.vy=0;c.localMoveVelocity.lastStepAt=1000;c.localMoveVelocity.cruiseSpeed=220;c.localMoveVelocity.heading=0;
+now=1100;
+const braked=c.evalMoveFn(c.moveState.me,now);
+if(!(Math.hypot(braked.vx,braked.vy)<220)) throw new Error('test setup did not enter destination braking');
+c.localMoveVelocity.vx=braked.vx;c.localMoveVelocity.vy=braked.vy;c.localMoveVelocity.lastStepAt=now; // cruiseSpeed intentionally remains 220
+now=1110;
+c.startMoveFn('me',505,300,200,300);
+const restored=Math.hypot(c.localMoveVelocity.vx,c.localMoveVelocity.vy);
+if(Math.abs(restored-220)>1e-6) throw new Error(`retarget inherited old-target braking: speed=${restored}`);
 
 // During continuous-retarget grace, even a 180-degree turn preserves scalar speed.
 now=1140;
