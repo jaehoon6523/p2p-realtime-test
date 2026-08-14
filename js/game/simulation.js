@@ -261,6 +261,7 @@ function tickMovement(){
 }
 function tickCombat(){
     if(!roomReady) return;
+    if(AUTO_MODE) tickAutoMode();
     const me=getPredictedTail(myId); if(!me) return;
     if(!me.alive){ delete moveState[myId]; const confirmed=confirmedWorld[myId]; if(confirmed&&!hasPendingType(myId,'respawn')&&performance.now()-(confirmed.deadObservedAt||0)>=RESPAWN_MS) executeLocal(makeRespawnCommand()); return; }
     if(me.hp<MAX_HP&&!hasPendingType(myId,'heal')){ const activity=activityAnchors.get(myId); const idleMs=activity?performance.now()-Math.max(activity.lastMoveAt,activity.lastDamageAt,activity.lastHealAt):0; if(idleMs>=1000) executeLocal(makeHealCommand()); }
@@ -357,6 +358,7 @@ function receiveSnapshot(remoteId,snapshot){
     tickAnchors.set(remoteId,{remoteTick:Number.isSafeInteger(snapshot.clockTick)?snapshot.clockTick:normalized.tick,localTime:now});
     activityAnchors.set(remoteId,{lastMoveAt:now,lastDamageAt:now,lastHealAt:now});
     log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence}/e${confirmedEventSeq.get(remoteId)||0} alive=${normalized.alive} history=${historyImported}`);
+    if(AUTO_MODE) setTimeout(tickAutoMode,0);
     acceptDeferred(remoteId,'simulation');
     acceptDeferred(remoteId,'event');
 }

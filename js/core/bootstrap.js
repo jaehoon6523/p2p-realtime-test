@@ -16,7 +16,6 @@ window.addEventListener('pagehide',shutdown); window.addEventListener('beforeunl
 
 setInterval(tickMovement,STEP_INTERVAL_MS);
 setInterval(tickCombat,100);
-setInterval(tickAutoMode,100);
 setInterval(renderLogs,150);
 setInterval(updateKda,1000);
 setInterval(()=>{ pruneRelayWorld(); pruneServerPolicies(); broadcastNeighborDigests(); },RELAY_INTERVAL_MS);

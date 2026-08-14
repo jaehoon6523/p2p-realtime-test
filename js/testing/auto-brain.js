@@ -10,6 +10,8 @@ const autoBrain = {
     nextRetargetAt:0,
     nextFireAt:0,
     nextWanderAt:0,
+    nextDecisionLogAt:0,
+    lastActionAt:0,
     strafeSign:Math.random()<.5?-1:1,
     wanderX:null,
     wanderY:null
@@ -82,43 +84,36 @@ function autoMoveAround(target,now){
 }
 
 function autoShoot(target,now){
-    if(!target || now<autoBrain.nextFireAt) return;
+    if(!target || now<autoBrain.nextFireAt) return false;
     const me=getPredictedTail(myId);
-    if(!me?.alive) return;
+    if(!me?.alive) return false;
 
     const tr=getRenderPosition(target.id)||target.render||target.state;
-    if(!tr) return;
-    const dx=tr.x-me.x, dy=tr.y-me.y;
-    const distance=Math.hypot(dx,dy);
-    if(distance<1 || distance>MAX_COMBAT_RANGE-4) return;
-
-    autoBrain.nextFireAt=now+AUTO_FIRE_MS*(.78+Math.random()*.44);
-    flushActiveMoveToNow(now);
-    const shooter=getPredictedTail(myId);
-    if(!shooter?.alive) return;
-
-    // 작은 오차를 섞되 거의 항상 실제 target 주변을 조준한다.
-    const aimX=tr.x+(Math.random()-.5)*7;
-    const aimY=tr.y+(Math.random()-.5)*7;
-    const adx=aimX-shooter.x, ady=aimY-shooter.y;
-    const len=Math.hypot(adx,ady)||1;
-    // AUTO 전투는 예전 평타 봇처럼 Q만 사용한다.
-    // W/E 선택 로직은 두지 않고, Q 사거리 밖이면 이동 AI가 접근하도록 맡긴다.
+    if(!tr) return false;
+    const distance=Math.hypot(tr.x-me.x,tr.y-me.y);
     const ability=ABILITY_DEFINITIONS.Q;
-    if(distance>ability.range-4) return;
-    const cmd=makeShootCommand(adx/len,ady/len,ability.id);
-    if(cmd) executeLocal(cmd);
+    if(distance<1 || distance>ability.range-4) return false;
+
+    // 판단만 AUTO가 한다. 실행/쿨다운/후딜/ability lineage는 인간 Q와 동일한 gate를 사용한다.
+    const aimPoint={x:tr.x+(Math.random()-.5)*7,y:tr.y+(Math.random()-.5)*7};
+    autoBrain.nextFireAt=now+AUTO_FIRE_MS*(.78+Math.random()*.44);
+    lastAimWorld=aimPoint;
+    tryCastAbility('Q',{aimPoint,source:'AUTO'});
+    autoBrain.lastActionAt=now;
+    return true;
 }
 
 function tickAutoMode(){
     if(!AUTO_MODE || !roomReady) return;
     const me=getPredictedTail(myId);
-    if(!me) return;
-    // heal/respawn은 기존 tickCombat이 동일 경로로 처리한다.
-    if(!me.alive) return;
+    if(!me||!me.alive) return;
 
     const now=performance.now();
     const target=autoChooseTarget();
     autoMoveAround(target,now);
-    autoShoot(target,now);
+    const fired=autoShoot(target,now);
+    if(AUTO_DEBUG && now>=autoBrain.nextDecisionLogAt){
+        autoBrain.nextDecisionLogAt=now+1000;
+        log('t-sys',`AUTO_TICK target=${target?.id||'-'} distance=${Number.isFinite(target?.distance)?target.distance.toFixed(1):'-'} qRange=${ABILITY_DEFINITIONS.Q.range} fired=${fired?'yes':'no'} move=${moveState[myId]?'active':'idle'}`);
+    }
 }

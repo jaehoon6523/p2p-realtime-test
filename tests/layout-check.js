@@ -75,7 +75,7 @@ const abilityData = fs.readFileSync(must('js/game/ability-definitions.js'),'utf8
 const config = fs.readFileSync(must('js/core/config-state.js'),'utf8');
 const server = fs.readFileSync(must('mmo-server/signaling-server.js'),'utf8');
 if(!config.includes('const MAX_PENDING_SHOOTS = 4;')) throw new Error('shoot concurrency cap missing');
-for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r12';"]){
+for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r13';"]){
   if(!config.includes(expected)) throw new Error(`client missing ${expected}`);
   if(!server.includes(expected)) throw new Error(`server missing ${expected}`);
 }
@@ -86,5 +86,15 @@ if(config.includes('const ABILITY_DEFINITIONS')) throw new Error('ability data d
 if(!readme.includes('js/game/ability-definitions.js')) throw new Error('README missing canonical ability data location');
 const input = fs.readFileSync(must('js/ui/input.js'),'utf8');
 if(input.includes("canvas.addEventListener('click'")) throw new Error('left click attack handler still present');
-if(!input.includes('tryCastAbility(key)')) throw new Error('Q/W/E ability input missing');
+if(!input.includes('function tryCastAbility(key')) throw new Error('Q/W/E ability input missing');
 console.log('PSSF layout: PASS');
+
+
+// r13 AUTO runtime contract
+const simulationText = fs.readFileSync(path.join(root,'js/game/simulation.js'),'utf8');
+if(!autoBrain.includes("tryCastAbility('Q',{aimPoint,source:'AUTO'})")) throw new Error('AUTO must use shared Q ability gate');
+if(autoBrain.includes('ABILITY_DEFINITIONS.W') || autoBrain.includes('makeDashCommand(')) throw new Error('AUTO must not select W/E');
+if(autoBrain.includes('makeShootCommand(')) throw new Error('AUTO must not bypass ability gate with direct shoot command');
+if(!input.includes("source='INPUT'")) throw new Error('shared ability gate source marker missing');
+if(bootstrap.includes('setInterval(tickAutoMode')) throw new Error('AUTO must not use detached timer lifecycle');
+if(!simulationText.includes('if(AUTO_MODE) tickAutoMode();')) throw new Error('AUTO must run from combat lifecycle');

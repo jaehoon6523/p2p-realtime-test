@@ -33,7 +33,7 @@ p2p-realtime-test/
 
 - game protocol: **13**
 - signaling protocol: **5**
-- ruleset: **pssf-v13-r12**
+- ruleset: **pssf-v13-r13**
 - server-assigned actor policy: `assignmentId / topologyEpoch / validatorIds / quorum`
 - simulation stream (`move/heal/respawn`): actor state sequence + deterministic dependency chain
 - shoot event stream: independent `eventSeq` + `simulationRef(sequence,stateHash)` + aim vector
@@ -142,7 +142,7 @@ Runtime 탭의 상단은 현재 상태 판단용 지표만 표시합니다.
 
 
 
-## AUTO combat policy (r12)
+## AUTO combat policy (r13)
 
 AUTO peers use **Q/basic_attack only** for combat. They never cast W or E. Targeting/movement stays autonomous, but attack execution uses the same Q `makeShootCommand` → validation → QC path as a normal peer.
 
@@ -211,3 +211,10 @@ E dash:         cast 200ms, recovery 200ms, cooldown 3000ms, distance 150
 ```
 
 TODO(XML): replace `ability-definitions.js` as the data source with the planned XML Ability/Component loader while preserving the same immutable runtime shape.
+
+## r13 AUTO Q runtime fix
+- AUTO combat decision is executed from the same `tickCombat()` lifecycle instead of a separate timer.
+- AUTO may choose only Q. W/E are never selected.
+- AUTO Q calls `tryCastAbility('Q', { source: 'AUTO' })`, so local cooldown, recovery lock, ability lineage, optimistic prediction, validator replay and QC are identical to human Q.
+- DataChannel open/snapshot merge wakes AUTO immediately; AUTO_DEBUG logs `AUTO_TICK`.
+- HUD text reflects Q cast=0 and W/E cast=0.2s.

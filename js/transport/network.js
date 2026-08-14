@@ -204,7 +204,7 @@ async function createPeer(remoteId,isOfferer,remoteSdp){
     };
     const bindChannel=dc=>{
         entry.dc=dc;
-        dc.onopen=()=>{ if(pageUnloading||peers.get(remoteId)!==entry) return; log('t-sig',`DataChannel open ↔ ${remoteId}`); refreshMembership('data channel open'); relayWorld.delete(remoteId); sendSnapshot(remoteId); sendNeighborDigest(remoteId); updatePeerList(); };
+        dc.onopen=()=>{ if(pageUnloading||peers.get(remoteId)!==entry) return; log('t-sig',`DataChannel open ↔ ${remoteId}`); refreshMembership('data channel open'); relayWorld.delete(remoteId); sendSnapshot(remoteId); sendPresence(); sendNeighborDigest(remoteId); if(AUTO_MODE) setTimeout(tickAutoMode,0); updatePeerList(); };
         dc.onmessage=event=>{ if(!pageUnloading&&peers.get(remoteId)===entry) deliverWireMessage(remoteId,event.data); };
         dc.onclose=()=>{ if(!pageUnloading&&peers.get(remoteId)===entry) removePeer(remoteId,'data channel closed'); };
         dc.onerror=event=>{ if(!pageUnloading) log('t-err',`DataChannel error ↔ ${remoteId}: ${event?.message||'unknown'}`); };

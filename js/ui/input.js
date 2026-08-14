@@ -15,7 +15,7 @@ function aimVectorFromWorld(me,point=lastAimWorld){
 function abilitySuppressed(ability,code,detail=''){
     log('warn',`ABILITY_SUPPRESSED key=${ability.key} ability=${ability.id} code=${code}${detail?` ${detail}`:''}`);
 }
-function tryCastAbility(key){
+function tryCastAbility(key,{aimPoint=null,source='INPUT'}={}){
     const ability=ABILITY_DEFINITIONS[key];
     if(!ability||!roomReady) return;
     const now=performance.now();
@@ -26,12 +26,12 @@ function tryCastAbility(key){
     const readyAt=localAbilityReadyAt.get(ability.id)||0;
     if(now<readyAt){ abilitySuppressed(ability,'COOLDOWN',`remaining=${Math.ceil(readyAt-now)}ms`); return; }
     if(now<localAbilityLockUntil){ abilitySuppressed(ability,'ACTION_LOCK',`remaining=${Math.ceil(localAbilityLockUntil-now)}ms`); return; }
-    const aim=aimVectorFromWorld(me);
+    const aim=aimVectorFromWorld(me,aimPoint||lastAimWorld);
     if(!aim){ abilitySuppressed(ability,'INVALID_AIM'); return; }
 
     localAbilityReadyAt.set(ability.id,now+ability.cooldownMs);
     localAbilityLockUntil=now+ability.castMs;
-    log('t-cmd',`ABILITY_CAST key=${ability.key} ability=${ability.id} cast=${ability.castMs}ms cooldown=${ability.cooldownMs}ms`);
+    log('t-cmd',`ABILITY_CAST source=${source} key=${ability.key} ability=${ability.id} cast=${ability.castMs}ms cooldown=${ability.cooldownMs}ms`);
     const release=()=>{
         if(!roomReady) return abilitySuppressed(ability,'ROOM_NOT_READY_AFTER_CAST');
         flushActiveMoveToNow();
@@ -43,7 +43,7 @@ function tryCastAbility(key){
         else if(ability.kind==='dash') command=makeDashCommand(aim.x,aim.y,releaseCastStartTick);
         if(command){
             executeLocal(command);
-            log('t-cmd',`ABILITY_RELEASE key=${ability.key} ability=${ability.id} ${commandSequenceText(command)}`);
+            log('t-cmd',`ABILITY_RELEASE source=${source} key=${ability.key} ability=${ability.id} ${commandSequenceText(command)}`);
         }else abilitySuppressed(ability,'COMMAND_NOT_CREATED');
         localAbilityLockUntil=Math.max(localAbilityLockUntil,performance.now()+ability.recoveryMs);
     };
