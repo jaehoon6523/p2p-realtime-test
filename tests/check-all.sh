@@ -10,3 +10,4 @@ node "$ROOT/tests/optimistic-contract.js"
 node "$ROOT/tests/bootstrap-ordering.js"
 node "$ROOT/tests/bootstrap-rx-ordering.js"
 echo 'PSSF all checks: PASS'
+node "$(dirname "$0")/auto-mesh-repair.js"

@@ -54,3 +54,10 @@ setInterval(()=>{
 setInterval(()=>{ networkMetrics.txRate=networkMetrics.txMessagesWindow; networkMetrics.rxRate=networkMetrics.rxMessagesWindow; networkMetrics.txByteRate=networkMetrics.txBytesWindow; networkMetrics.rxByteRate=networkMetrics.rxBytesWindow; networkMetrics.txMessagesWindow=networkMetrics.rxMessagesWindow=networkMetrics.txBytesWindow=networkMetrics.rxBytesWindow=0; },1000);
 
 log('t-sys',`local peer boot id=${myId} mode=${AUTO_MODE?'AUTO':'MANUAL'} protocol=${PROTOCOL} ruleset=${RULESET_REVISION} signalProtocol=${SIGNAL_PROTOCOL} room=${ROOM_ID} world=${WORLD_WIDTH}x${WORLD_HEIGHT} margin=${WORLD_MARGIN} aoi=${AOI_RADIUS} committee=${COMMITTEE_SIZE} relay=1.5-hop netem=${NETEM_ENABLED?`rtt:${NETEM_PING_MS} jitter:${NETEM_JITTER_MS} loss:${NETEM_LOSS_PCT} drop:${NETEM_DROP_PCT} spike:${NETEM_SPIKE_PCT}/${NETEM_SPIKE_MS}`:'off'}`);
+
+
+if(AUTO_MODE && window.parent!==window){
+    setInterval(()=>{
+        try{ window.parent.postMessage({type:'pssf-auto-status',peerId:myId,direct:directOpenPeerIds().length,desired:desiredDirectPeers.size,room:ROOM_ID},'*'); }catch(_){}
+    },500);
+}

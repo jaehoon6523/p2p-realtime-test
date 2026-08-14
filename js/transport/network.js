@@ -184,7 +184,13 @@ async function applyTopologyAssignment(policy,reason='update'){
     for(const id of next){
         const transport=peerTransport(id);
         const existing=peers.get(id);
-        if(existing&&existing.transport===transport) continue;
+        if(existing&&existing.transport===transport){
+            if(transport==='webrtc'&&!isPeerOpen(id)&&!existing.pc&&myId<id){
+                peers.delete(id);
+                await createPeer(id,true);
+            }
+            continue;
+        }
         if(existing) removePeer(id,'transport changed');
         if(transport==='ws-bot'){
             peers.set(id,{transport:'ws-bot',pc:null,dc:null,state:'open',remoteId:id,pendingIce:[]});
@@ -207,13 +213,50 @@ function reconnectSignaling(){
 }
 window.reconnectSignaling=reconnectSignaling;
 
+// Desired direct topology is a contract, not a one-shot suggestion. WebRTC offer/answer can
+// race while several AUTO iframes join at once, so the deterministic offerer repairs missing
+// direct edges until the DataChannel is actually open.
+let directMeshRepairTimer=null;
+const DIRECT_MESH_REPAIR_MS=1200;
+const DIRECT_CONNECT_STALE_MS=5000;
+function startDirectMeshRepair(){
+    if(directMeshRepairTimer) return;
+    directMeshRepairTimer=setInterval(repairDesiredDirectMesh,DIRECT_MESH_REPAIR_MS);
+}
+function peerNeedsDirectRepair(remoteId){
+    if(!desiredDirectPeers.has(remoteId) || peerTransport(remoteId)!=='webrtc') return false;
+    const peer=peers.get(remoteId);
+    if(!peer) return true;
+    if(isPeerOpen(remoteId)) return false;
+    if(!peer.pc) return myId<remoteId;
+    const state=peer.pc.connectionState;
+    if(state==='failed'||state==='closed') return true;
+    const age=performance.now()-(peer.connectStartedAt||performance.now());
+    return myId<remoteId && age>=DIRECT_CONNECT_STALE_MS && state!=='connected';
+}
+async function repairDesiredDirectMesh(){
+    if(pageUnloading||!roomReady) return;
+    for(const remoteId of desiredDirectPeers){
+        if(!peerNeedsDirectRepair(remoteId)) continue;
+        const existing=peers.get(remoteId);
+        if(existing) removePeer(remoteId,'direct mesh repair');
+        if(myId<remoteId){
+            signalLog('t-sig',`DIRECT_MESH_REPAIR offer→${remoteId}`);
+            try{ await createPeer(remoteId,true); }catch(error){ signalLog('t-err',`direct mesh repair failed peer=${remoteId}: ${error.message}`); }
+        }else if(!peers.has(remoteId)){
+            peers.set(remoteId,{transport:'webrtc',pc:null,dc:null,state:'awaiting-offer',remoteId,pendingIce:[...(prePeerIce.get(remoteId)||[])],connectStartedAt:performance.now()});
+        }
+    }
+}
+startDirectMeshRepair();
+
 async function flushIce(peer){
     if(!peer?.pc?.remoteDescription) return; const queued=peer.pendingIce||[]; peer.pendingIce=[];
     for(const candidate of queued) try{ await peer.pc.addIceCandidate(candidate); }catch(error){ log('t-err',`ICE rejected peer=${peer.remoteId}: ${error.message}`); }
 }
 async function createPeer(remoteId,isOfferer,remoteSdp){
     const existing=peers.get(remoteId); if(existing?.pc&&!['closed','failed'].includes(existing.pc.connectionState)) return;
-    const pc=new RTCPeerConnection(STUN); const entry={transport:'webrtc',pc,dc:null,state:'connecting',remoteId,pendingIce:[...(existing?.pendingIce||[]),...(prePeerIce.get(remoteId)||[])]}; prePeerIce.delete(remoteId); peers.set(remoteId,entry);
+    const pc=new RTCPeerConnection(STUN); const entry={transport:'webrtc',pc,dc:null,state:'connecting',remoteId,pendingIce:[...(existing?.pendingIce||[]),...(prePeerIce.get(remoteId)||[])],connectStartedAt:performance.now()}; prePeerIce.delete(remoteId); peers.set(remoteId,entry);
     pc.onicecandidate=event=>{ if(event.candidate) sendSignal({type:'ice',to:remoteId,candidate:event.candidate}); };
     pc.onconnectionstatechange=()=>{
         if(pageUnloading||tearingDownPeers.has(remoteId)||peers.get(remoteId)!==entry) return; entry.state=pc.connectionState; clearTimeout(disconnectTimers.get(remoteId)); disconnectTimers.delete(remoteId);
