@@ -18,7 +18,7 @@ mustNot('client');
 mustNot('server');
 
 const html = fs.readFileSync(hardened,'utf8');
-const refs = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map(m=>m[1]);
+const refs = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map(m=>m[1].split('?')[0]);
 if(!refs.length) throw new Error('hardened entrypoint does not reference split runtime');
 for(const ref of refs){ if(/^https?:/.test(ref)) continue; must(ref); }
 for(const rel of [
@@ -75,7 +75,7 @@ const abilityData = fs.readFileSync(must('js/game/ability-definitions.js'),'utf8
 const config = fs.readFileSync(must('js/core/config-state.js'),'utf8');
 const server = fs.readFileSync(must('mmo-server/signaling-server.js'),'utf8');
 if(!config.includes('const MAX_PENDING_SHOOTS = 4;')) throw new Error('shoot concurrency cap missing');
-for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r19';"]){
+for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r21';"]){
   if(!config.includes(expected)) throw new Error(`client missing ${expected}`);
   if(!server.includes(expected)) throw new Error(`server missing ${expected}`);
 }
@@ -98,3 +98,10 @@ if(autoBrain.includes('makeShootCommand(')) throw new Error('AUTO must not bypas
 if(!input.includes("source='INPUT'")) throw new Error('shared ability gate source marker missing');
 if(bootstrap.includes('setInterval(tickAutoMode')) throw new Error('AUTO must not use detached timer lifecycle');
 if(!simulationText.includes('if(AUTO_MODE) tickAutoMode();')) throw new Error('AUTO must run from combat lifecycle');
+
+// r21: active retarget + ordered bootstrap transport
+{
+ const sim=fs.readFileSync(path.join(root,'js/game/simulation.js'),'utf8');
+ if(sim.includes('queueCommandUntilBootstrap')) throw new Error('r21: ACK backlog must be removed');
+ if(!sim.includes('const previousSample=previous?evalMove(previous,now):null;')) throw new Error('r21: live retarget must sample without flushing old plan');
+}

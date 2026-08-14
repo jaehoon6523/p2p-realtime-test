@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r19';
+const RULESET_REVISION = 'pssf-v13-r21';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
@@ -142,8 +142,8 @@ const optimisticEffects = new Map(); // commandId -> {kind,status,createdAt,...}
 const botTelegraphs = new Map();
 const bootstrapAckPeers = new Set();
 const bootstrapPendingSince = new Map(); // peer -> last bootstrap send time
-const bootstrapAckState = new Map(); // peer -> {sequence,eventSequence}
-const bootstrapCommandBacklog = new Map(); // peer -> ordered local commands waiting for bootstrap ACK
+const bootstrapAckState = new Map(); // peer -> {sequence,eventSequence}; health/telemetry only
+const bootstrapSentPeers = new Set(); // peer -> bootstrap snapshot has been put on the ordered transport
 const hitFlashes = Object.create(null);
 const pendingById = new Map();
 const pendingOrderByPlayer = new Map(); // simulation stream

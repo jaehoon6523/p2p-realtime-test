@@ -12,6 +12,6 @@ assert(network.includes('markBootstrapPending(id); sendSnapshot(id,{bootstrap:tr
 assert(sim.includes('if(bootstrap){')&&sim.includes('sendWireNow(remoteId,message)'),'bootstrap snapshot must bypass synthetic netem');
 assert(sim.includes("sendWireNow(remoteId,{kind:'snapshotAck'"),'receiver must ACK installed snapshot');
 assert(sim.includes('bootstrapAckPeers.add(remoteId)'),'snapshot ACK must mark peer ready');
-assert(auto.includes('if(!bootstrapReadyForAuto())'),'AUTO must gate actions on bootstrap ACK');
+assert(auto.includes('if(!bootstrapReadyForAuto())'),'AUTO must wait until bootstrap has been sent to open direct peers');
 assert(auto.includes("tryCastAbility('Q',{aimPoint,source:'AUTO'})"),'AUTO must still use shared Q ability path');
 console.log('PSSF bootstrap ordering: PASS');

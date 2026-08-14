@@ -33,7 +33,7 @@ p2p-realtime-test/
 
 - game protocol: **13**
 - signaling protocol: **5**
-- ruleset: **pssf-v13-r19**
+- ruleset: **pssf-v13-r21**
 - server-assigned actor policy: `assignmentId / topologyEpoch / validatorIds / quorum`
 - simulation stream (`move/heal/respawn`): actor state sequence + deterministic dependency chain
 - shoot event stream: independent `eventSeq` + `simulationRef(sequence,stateHash)` + aim vector
@@ -242,3 +242,8 @@ Movement command generation now has one position authority: `getPredictedTail(my
 Each tick evaluates an absolute desired position from the time profile, then emits bounded move commands from the current predicted chain tail toward that absolute point. `finished` only ends the plan after the predicted tail is actually within the target epsilon, so a completed path cannot keep replaying the original start-to-target delta.
 
 Large frame gaps are still chunked below the movement validation limit. Retarget, rejection/rebase, and backpressure all re-enter through the same predicted-tail boundary.
+
+
+## r21 fixes
+- Active right-click retarget replaces the movement plan immediately from the current predicted tail; it does not flush the old plan first.
+- Bootstrap ACK is telemetry only. Reliable ordered DataChannel delivery plus immediate bootstrap send establishes bootstrap-before-command ordering without an ACK-gated backlog.

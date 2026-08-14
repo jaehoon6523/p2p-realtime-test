@@ -30,3 +30,10 @@ https://jaehoon6523.github.io/p2p-realtime-test/p2p-mmo-demo-hardened.html?signa
 - MOVE_INVALID/rejection이 동기적으로 movement state를 rebase하면 이전 movement 객체를 즉시 폐기하고 현재 tick 후처리를 중단합니다.
 - 프레임/타이머 지연으로 한 번의 movement delta가 커진 경우 BASE_MAX_STEP보다 보수적인 chunk로 분할해 정상 입력이 MOVE_INVALID를 유발하지 않게 합니다.
 - 회귀 테스트: `tests/movement-stale-ref.js`.
+
+## Browser asset version pin
+
+- Expected build/ruleset: `pssf-v13-r21`
+- Demo HTML script URLs are pinned with `?v=pssf-v13-r21`.
+- Public test URLs should include `&build=pssf-v13-r21` so the HTML document itself also gets a distinct cache key.
+- After deploy, reject any browser log whose `local peer boot` line is not `ruleset=pssf-v13-r21`.

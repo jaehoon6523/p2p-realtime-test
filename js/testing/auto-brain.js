@@ -110,7 +110,7 @@ function tickAutoMode(){
         if(AUTO_DEBUG && now>=autoBrain.nextDecisionLogAt){
             autoBrain.nextDecisionLogAt=now+1000;
             const direct=directOpenPeerIds();
-            log('t-sys',`AUTO_BOOTSTRAP_WAIT ack=${direct.filter(id=>bootstrapAckPeers.has(id)).length}/${direct.length}`);
+            log('t-sys',`AUTO_BOOTSTRAP_WAIT sent=${direct.filter(id=>bootstrapSentPeers.has(id)).length}/${direct.length}`);
         }
         return;
     }

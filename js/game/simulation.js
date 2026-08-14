@@ -183,14 +183,15 @@ function startMove(playerId,fromX,fromY,toX,toY){
     const now=performance.now();
     tracePosition('retarget:input',{force:true,now,extra:`fromArg=${fromX.toFixed(2)},${fromY.toFixed(2)} click=${toX.toFixed(2)},${toY.toFixed(2)}`});
     const previous=moveState[myId];
-    let sampled=null;
-    if(previous) sampled=flushActiveMoveToNow(now).sample;
-    // The chain tail, not render interpolation and not a cached movement sample, is the sole start point.
+    // Retarget must never flush the old plan first. Flushing can synchronously mutate/replace
+    // the active plan during command commit and used to abort the retarget before it was armed.
+    // The protocol chain tail is already the only authoritative local position cursor.
+    const previousSample=previous?evalMove(previous,now):null;
     const alignedTail=getPredictedTail(myId);
     const startX=alignedTail?.x??fromX,startY=alignedTail?.y??fromY;
     const dx=toX-startX,dy=toY-startY,distance=Math.hypot(dx,dy);
     if(distance<=MOVE_FINISH_EPSILON){ delete moveState[myId]; return; }
-    const currentSpeed=sampled&&!sampled.finished?sampled.speed:0;
+    const currentSpeed=previousSample&&!previousSample.finished?Math.max(0,previousSample.speed||0):0;
     const profile=buildMoveProfile(distance,currentSpeed);
     moveState[myId]={
         startX,startY,targetX:toX,targetY:toY,dirX:dx/distance,dirY:dy/distance,distance,
@@ -372,12 +373,12 @@ function receiveHistoryRepair(remoteId,repair){
 function markBootstrapPending(remoteId){
     bootstrapAckPeers.delete(remoteId);
     bootstrapAckState.delete(remoteId);
+    bootstrapSentPeers.delete(remoteId);
     bootstrapPendingSince.set(remoteId,0);
-    if(!bootstrapCommandBacklog.has(remoteId)) bootstrapCommandBacklog.set(remoteId,[]);
 }
 function bootstrapReadyForAuto(){
     const direct=directOpenPeerIds();
-    return direct.length>0 && direct.every(id=>bootstrapAckPeers.has(id));
+    return direct.length>0 && direct.every(id=>bootstrapSentPeers.has(id));
 }
 function sendSnapshot(remoteId,{bootstrap=false}={}){
     if(!isPeerOpen(remoteId)) return false;
@@ -391,44 +392,21 @@ function sendSnapshot(remoteId,{bootstrap=false}={}){
     // so initial state bypasses that queue and relies on the transport's own ordering.
     if(bootstrap){
         const sent=sendWireNow(remoteId,message);
-        if(sent) bootstrapPendingSince.set(remoteId,performance.now());
+        if(sent){
+            bootstrapSentPeers.add(remoteId);
+            bootstrapPendingSince.set(remoteId,performance.now());
+            log('t-sys',`${AUTO_MODE?'AUTO_':''}BOOTSTRAP_SENT peer=${remoteId} seq=${state.sequence}/e${snapshot.eventSequence}`);
+        }
         return sent;
     }
     return safeDataSend(remoteId,message);
 }
-function bootstrapCommandCovered(command,ack){
-    if(!ack) return false;
-    if(commandStream(command)==='event') return Number.isSafeInteger(command.eventSeq) && command.eventSeq<=ack.eventSequence;
-    return Number.isSafeInteger(command.sequence) && command.sequence<=ack.sequence;
-}
-function queueCommandUntilBootstrap(remoteId,command){
-    const backlog=bootstrapCommandBacklog.get(remoteId)||[];
-    backlog.push(command);
-    if(backlog.length>256) backlog.splice(0,backlog.length-256);
-    bootstrapCommandBacklog.set(remoteId,backlog);
-    const last=bootstrapPendingSince.get(remoteId)||0;
-    if(performance.now()-last>=250) sendSnapshot(remoteId,{bootstrap:true});
-}
-function flushBootstrapBacklog(remoteId){
-    const ack=bootstrapAckState.get(remoteId);
-    if(!ack||!isPeerOpen(remoteId)) return;
-    const backlog=bootstrapCommandBacklog.get(remoteId)||[];
-    const remaining=[];
-    for(const command of backlog){
-        if(bootstrapCommandCovered(command,ack)) continue;
-        if(!safeDataSend(remoteId,{kind:'command',command})) remaining.push(command);
-    }
-    bootstrapCommandBacklog.set(remoteId,remaining);
-    if(remaining.length) log('t-sys',`BOOTSTRAP_BACKLOG_FLUSH peer=${remoteId} sent=${backlog.length-remaining.length} remain=${remaining.length} ack=s${ack.sequence}/e${ack.eventSequence}`);
-}
 function sendCommandToPeer(remoteId,command){
     if(!isPeerOpen(remoteId)) return false;
-    if(!bootstrapAckPeers.has(remoteId)){
-        queueCommandUntilBootstrap(remoteId,command);
-        return true;
-    }
-    const ack=bootstrapAckState.get(remoteId);
-    if(bootstrapCommandCovered(command,ack)) return true;
+    // DataChannel is reliable+ordered. Bootstrap is inserted synchronously on that transport
+    // and bypasses synthetic netem; commands may therefore follow immediately without an ACK gate.
+    // ACK remains telemetry/repair information only, never a liveness dependency.
+    if(!bootstrapSentPeers.has(remoteId) && !sendSnapshot(remoteId,{bootstrap:true})) return false;
     return safeDataSend(remoteId,{kind:'command',command});
 }
 function retryPendingBootstraps(){
@@ -452,8 +430,17 @@ function receiveSnapshotAck(remoteId,ack){
     }
     bootstrapAckPeers.add(remoteId);
     bootstrapPendingSince.delete(remoteId);
-    flushBootstrapBacklog(remoteId);
     log('t-sys',`${AUTO_MODE?'AUTO_':''}BOOTSTRAP_ACK peer=${remoteId} seq=${ack.sequence}/e${eventSequence}`);
+}
+function sendInstalledBootstrapAck(remoteId){
+    const installed=confirmedWorld[remoteId];
+    if(!installed||!isPeerOpen(remoteId)) return false;
+    return sendWireNow(remoteId,{kind:'snapshotAck',ack:{
+        protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,ownerId:remoteId,
+        sequence:confirmedSeq.get(remoteId)||installed.sequence||0,
+        eventSequence:confirmedEventSeq.get(remoteId)||0,
+        stateHash:stateHash(installed)
+    }});
 }
 function receiveSnapshot(remoteId,snapshot){
     if(!snapshot||snapshot.protocol!==PROTOCOL||snapshot.rulesetRevision!==RULESET_REVISION||snapshot.senderId!==remoteId||!snapshot.state) return;
@@ -464,6 +451,7 @@ function receiveSnapshot(remoteId,snapshot){
     const localSeq=confirmedSeq.get(remoteId)||0;
     if(state.sequence<localSeq){
         if(historyImported) acceptDeferred(remoteId,'event');
+        if(snapshot.bootstrap) sendInstalledBootstrapAck(remoteId);
         return;
     }
     const snapshotEventSequence=Number.isSafeInteger(snapshot.eventSequence)?snapshot.eventSequence:(confirmedEventSeq.get(remoteId)||0);
@@ -477,8 +465,10 @@ function receiveSnapshot(remoteId,snapshot){
     activityAnchors.set(remoteId,{lastMoveAt:now,lastDamageAt:now,lastHealAt:now});
     log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence}/e${confirmedEventSeq.get(remoteId)||0} alive=${normalized.alive} history=${historyImported}`);
     if(snapshot.bootstrap){
-        // ACK only after seq=0/base state is actually installed locally.
-        sendWireNow(remoteId,{kind:'snapshotAck',ack:{protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,ownerId:remoteId,sequence:normalized.sequence,eventSequence:confirmedEventSeq.get(remoteId)||0,stateHash:stateHash(normalized)}});
+        // ACK only after a base state is installed. A later stale bootstrap retry is ACKed
+        // with the newer installed prefix above, so ACK loss can never deadlock command flow.
+        sendInstalledBootstrapAck(remoteId);
+        log('t-sys',`${AUTO_MODE?'AUTO_':''}BOOTSTRAP_RX peer=${remoteId} seq=${normalized.sequence}/e${confirmedEventSeq.get(remoteId)||0}`);
     }
     if(AUTO_MODE) setTimeout(tickAutoMode,0);
     acceptDeferred(remoteId,'simulation');

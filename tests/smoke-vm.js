@@ -185,3 +185,4 @@ if(!server.includes("const stream = r.stream === 'event' ? 'event' : r.stream ==
 if(!server.includes('streamSeq: bucket.streamSeq')) throw new Error('certificate stream sequence binding missing');
 
 console.log('PSSF smoke: PASS');
+process.exit(0);
