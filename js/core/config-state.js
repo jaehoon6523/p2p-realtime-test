@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r18';
+const RULESET_REVISION = 'pssf-v13-r19';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
@@ -130,7 +130,7 @@ function tracePosition(reason,{force=false,now=performance.now(),extra=''}={}){
     const diverged=[dPV,dPC].some(v=>Number.isFinite(v)&&v>POSITION_TRACE_DIVERGENCE_WARN);
     const phase=evaluated?.phase||'-';
     const seq=++positionTraceSeq;
-    const text=`[POS#${seq}] ${reason} render=${fmtPos(render)} predicted=${fmtPos(predicted)} visible=${fmtPos(visible)} confirmed=${fmtPos(confirmed)} eval=${fmtPos(evaluated)} target=${movement?`${movement.targetX.toFixed(2)},${movement.targetY.toFixed(2)}`:'-'} last=${movement?`${movement.lastX.toFixed(2)},${movement.lastY.toFixed(2)}`:'-'} dR-P=${fmtDist(dRP)} dP-V=${fmtDist(dPV)} dP-C=${fmtDist(dPC)} dR-T=${fmtDist(dRT)} seq=${predicted?.sequence??'-'} phase=${phase}${extra?` ${extra}`:''}`;
+    const text=`[POS#${seq}] ${reason} render=${fmtPos(render)} predicted=${fmtPos(predicted)} visible=${fmtPos(visible)} confirmed=${fmtPos(confirmed)} eval=${fmtPos(evaluated)} target=${movement?`${movement.targetX.toFixed(2)},${movement.targetY.toFixed(2)}`:'-'} start=${movement?`${movement.startX.toFixed(2)},${movement.startY.toFixed(2)}`:'-'} dR-P=${fmtDist(dRP)} dP-V=${fmtDist(dPV)} dP-C=${fmtDist(dPC)} dR-T=${fmtDist(dRT)} seq=${predicted?.sequence??'-'} phase=${phase}${extra?` ${extra}`:''}`;
     log(diverged?'t-warn':'t-pos',text);
 }
 const localRenderState={fromX:null,fromY:null,toX:null,toY:null,startedAt:0,duration:1};

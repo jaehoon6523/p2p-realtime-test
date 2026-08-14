@@ -9,8 +9,8 @@ node "$ROOT/tests/server-qc-vm.js"
 node "$ROOT/tests/optimistic-contract.js"
 node "$ROOT/tests/bootstrap-ordering.js"
 node "$ROOT/tests/bootstrap-rx-ordering.js"
+node "$ROOT/tests/auto-mesh-repair.js"
+node "$ROOT/tests/bootstrap-command-backlog.js"
+node "$ROOT/tests/movement-stale-ref.js"
+node "$ROOT/tests/movement-single-source.js"
 echo 'PSSF all checks: PASS'
-node "$(dirname "$0")/auto-mesh-repair.js"
-node "$(dirname "$0")/bootstrap-command-backlog.js"
-
-node tests/movement-stale-ref.js
