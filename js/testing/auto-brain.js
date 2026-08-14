@@ -105,6 +105,15 @@ function autoShoot(target,now){
 
 function tickAutoMode(){
     if(!AUTO_MODE || !roomReady) return;
+    if(!bootstrapReadyForAuto()){
+        const now=performance.now();
+        if(AUTO_DEBUG && now>=autoBrain.nextDecisionLogAt){
+            autoBrain.nextDecisionLogAt=now+1000;
+            const direct=directOpenPeerIds();
+            log('t-sys',`AUTO_BOOTSTRAP_WAIT ack=${direct.filter(id=>bootstrapAckPeers.has(id)).length}/${direct.length}`);
+        }
+        return;
+    }
     const me=getPredictedTail(myId);
     if(!me||!me.alive) return;
 

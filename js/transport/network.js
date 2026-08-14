@@ -46,6 +46,7 @@ function handleWireMessage(remoteId,raw){
     let message; try{ if(typeof raw!=='string'||raw.length>128*1024) throw new Error('message too large'); message=JSON.parse(raw); noteTraffic('rx',message.kind,byteLength(raw)); }catch(error){ invalidCounter++; log('t-err',`invalid JSON from=${remoteId}: ${error.message}`); return; }
     if(message.kind==='command') receiveCommand(remoteId,message.command);
     else if(message.kind==='snapshot') receiveSnapshot(remoteId,message.snapshot);
+    else if(message.kind==='snapshotAck') receiveSnapshotAck(remoteId,message.ack);
     else if(message.kind==='historyRepair') receiveHistoryRepair(remoteId,message.repair);
     else if(message.kind==='neighborDigest') receiveNeighborDigest(remoteId,message.digest);
     else if(message.kind==='botTelegraph') receiveBotTelegraph(remoteId,message.telegraph);
@@ -169,7 +170,7 @@ async function applyTopologyAssignment(policy,reason='update'){
         if(existing) removePeer(id,'transport changed');
         if(transport==='ws-bot'){
             peers.set(id,{transport:'ws-bot',pc:null,dc:null,state:'open',remoteId:id,pendingIce:[]});
-            relayWorld.delete(id); sendSnapshot(id);
+            relayWorld.delete(id); markBootstrapPending(id); sendSnapshot(id,{bootstrap:true});
             continue;
         }
         if(myId<id) await createPeer(id,true);
@@ -204,7 +205,7 @@ async function createPeer(remoteId,isOfferer,remoteSdp){
     };
     const bindChannel=dc=>{
         entry.dc=dc;
-        dc.onopen=()=>{ if(pageUnloading||peers.get(remoteId)!==entry) return; log('t-sig',`DataChannel open ↔ ${remoteId}`); refreshMembership('data channel open'); relayWorld.delete(remoteId); sendSnapshot(remoteId); sendPresence(); sendNeighborDigest(remoteId); if(AUTO_MODE) setTimeout(tickAutoMode,0); updatePeerList(); };
+        dc.onopen=()=>{ if(pageUnloading||peers.get(remoteId)!==entry) return; log('t-sig',`DataChannel open ↔ ${remoteId}`); refreshMembership('data channel open'); relayWorld.delete(remoteId); markBootstrapPending(remoteId); sendSnapshot(remoteId,{bootstrap:true}); sendPresence(); sendNeighborDigest(remoteId); if(AUTO_MODE) setTimeout(tickAutoMode,0); updatePeerList(); };
         dc.onmessage=event=>{ if(!pageUnloading&&peers.get(remoteId)===entry) deliverWireMessage(remoteId,event.data); };
         dc.onclose=()=>{ if(!pageUnloading&&peers.get(remoteId)===entry) removePeer(remoteId,'data channel closed'); };
         dc.onerror=event=>{ if(!pageUnloading) log('t-err',`DataChannel error ↔ ${remoteId}: ${event?.message||'unknown'}`); };
@@ -220,7 +221,7 @@ function removePeer(remoteId,reason='unknown'){
         if(peer.dc){ peer.dc.onopen=peer.dc.onmessage=peer.dc.onclose=peer.dc.onerror=null; }
         if(peer.pc){ peer.pc.onicecandidate=peer.pc.onconnectionstatechange=peer.pc.ondatachannel=null; }
         try{ if(peer.dc?.readyState!=='closed') peer.dc?.close(); }catch(_){} try{ if(peer.pc?.connectionState!=='closed') peer.pc?.close(); }catch(_){}
-        delete confirmedWorld[remoteId]; delete visibleWorld[remoteId]; delete moveState[remoteId]; delete remoteRenderState[remoteId]; delete hitFlashes[remoteId]; confirmedSeq.delete(remoteId); confirmedEventSeq.delete(remoteId); simulationStateHistory.delete(remoteId); tickAnchors.delete(remoteId); activityAnchors.delete(remoteId); prePeerIce.delete(remoteId);
+        delete confirmedWorld[remoteId]; delete visibleWorld[remoteId]; delete moveState[remoteId]; delete remoteRenderState[remoteId]; delete hitFlashes[remoteId]; confirmedSeq.delete(remoteId); confirmedEventSeq.delete(remoteId); simulationStateHistory.delete(remoteId); tickAnchors.delete(remoteId); activityAnchors.delete(remoteId); prePeerIce.delete(remoteId); bootstrapAckPeers.delete(remoteId); bootstrapPendingSince.delete(remoteId);
         for(const [id,pending] of [...pendingById]) if(pending.command.playerId===remoteId){ clearTimeout(pending.timeoutId); pendingById.delete(id); }
         pendingOrderByPlayer.delete(remoteId); pendingEventOrderByPlayer.delete(remoteId);
         if(!pageUnloading){ if(wasMember) refreshMembership('peer removed'); updatePeerList(); log('t-sys',`peer removed ↔ ${remoteId} (${reason})`); }

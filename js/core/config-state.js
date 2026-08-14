@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r13';
+const RULESET_REVISION = 'pssf-v13-r14';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
@@ -139,7 +139,9 @@ const relayWorld = new Map(); // discovery-only 1.5-hop summaries; never authori
 const seenRelayRecords = new Map();
 const bullets = []; // optimistic projectile trails; never authoritative damage
 const optimisticEffects = new Map(); // commandId -> {kind,status,createdAt,...}; UX/correction only
-const botTelegraphs = new Map(); // optional server-bot prefire hints; never gameplay authority
+const botTelegraphs = new Map();
+const bootstrapAckPeers = new Set();
+const bootstrapPendingSince = new Map(); // optional server-bot prefire hints; never gameplay authority
 const hitFlashes = Object.create(null);
 const pendingById = new Map();
 const pendingOrderByPlayer = new Map(); // simulation stream

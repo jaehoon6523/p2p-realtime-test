@@ -328,14 +328,32 @@ function receiveHistoryRepair(remoteId,repair){
     // Targeted historical repair is for consequential events. It must not rewind current simulation state.
     acceptDeferred(remoteId,'event');
 }
-function sendSnapshot(remoteId){
-    if(!isPeerOpen(remoteId)) return;
+function markBootstrapPending(remoteId){
+    bootstrapAckPeers.delete(remoteId);
+    bootstrapPendingSince.set(remoteId,performance.now());
+}
+function bootstrapReadyForAuto(){
+    const direct=directOpenPeerIds();
+    return direct.length>0 && direct.every(id=>bootstrapAckPeers.has(id));
+}
+function sendSnapshot(remoteId,{bootstrap=false}={}){
+    if(!isPeerOpen(remoteId)) return false;
     const state=confirmedWorld[myId];
     const snapshot={
         protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,clockTick:currentTick(),eventSequence:confirmedEventSeq.get(myId)||0,
-        state:{...state,deadObservedAt:0},stateHash:stateHash(state),historyTail:snapshotHistoryTail()
+        state:{...state,deadObservedAt:0},stateHash:stateHash(state),historyTail:snapshotHistoryTail(),bootstrap:Boolean(bootstrap)
     };
-    safeDataSend(remoteId,{kind:'snapshot',snapshot});
+    const message={kind:'snapshot',snapshot};
+    // Bootstrap state must precede seq=1 commands. Netem schedules messages independently,
+    // so initial state bypasses that queue and relies on the transport's own ordering.
+    return bootstrap ? sendWireNow(remoteId,message) : safeDataSend(remoteId,message);
+}
+function receiveSnapshotAck(remoteId,ack){
+    if(!ack||ack.protocol!==PROTOCOL||ack.rulesetRevision!==RULESET_REVISION||ack.senderId!==remoteId||ack.ownerId!==myId) return;
+    if(!Number.isSafeInteger(ack.sequence)||ack.sequence<0) return;
+    bootstrapAckPeers.add(remoteId);
+    bootstrapPendingSince.delete(remoteId);
+    if(AUTO_MODE) log('t-sys',`AUTO_BOOTSTRAP_ACK peer=${remoteId} seq=${ack.sequence}`);
 }
 function receiveSnapshot(remoteId,snapshot){
     if(!snapshot||snapshot.protocol!==PROTOCOL||snapshot.rulesetRevision!==RULESET_REVISION||snapshot.senderId!==remoteId||!snapshot.state) return;
@@ -358,6 +376,10 @@ function receiveSnapshot(remoteId,snapshot){
     tickAnchors.set(remoteId,{remoteTick:Number.isSafeInteger(snapshot.clockTick)?snapshot.clockTick:normalized.tick,localTime:now});
     activityAnchors.set(remoteId,{lastMoveAt:now,lastDamageAt:now,lastHealAt:now});
     log('t-sys',`snapshot merged from=${remoteId} seq=${normalized.sequence}/e${confirmedEventSeq.get(remoteId)||0} alive=${normalized.alive} history=${historyImported}`);
+    if(snapshot.bootstrap){
+        // ACK only after seq=0/base state is actually installed locally.
+        sendWireNow(remoteId,{kind:'snapshotAck',ack:{protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,ownerId:remoteId,sequence:normalized.sequence,stateHash:stateHash(normalized)}});
+    }
     if(AUTO_MODE) setTimeout(tickAutoMode,0);
     acceptDeferred(remoteId,'simulation');
     acceptDeferred(remoteId,'event');

@@ -33,7 +33,7 @@ p2p-realtime-test/
 
 - game protocol: **13**
 - signaling protocol: **5**
-- ruleset: **pssf-v13-r13**
+- ruleset: **pssf-v13-r14**
 - server-assigned actor policy: `assignmentId / topologyEpoch / validatorIds / quorum`
 - simulation stream (`move/heal/respawn`): actor state sequence + deterministic dependency chain
 - shoot event stream: independent `eventSeq` + `simulationRef(sequence,stateHash)` + aim vector
@@ -218,3 +218,9 @@ TODO(XML): replace `ability-definitions.js` as the data source with the planned 
 - AUTO Q calls `tryCastAbility('Q', { source: 'AUTO' })`, so local cooldown, recovery lock, ability lineage, optimistic prediction, validator replay and QC are identical to human Q.
 - DataChannel open/snapshot merge wakes AUTO immediately; AUTO_DEBUG logs `AUTO_TICK`.
 - HUD text reflects Q cast=0 and W/E cast=0.2s.
+
+
+## r14 AUTO bootstrap ordering
+- Initial peer snapshot bypasses synthetic netem so it cannot be reordered behind seq=1 commands.
+- Receiver sends `snapshotAck` only after installing the base state.
+- AUTO movement/Q remains gated until every direct peer has ACKed the local bootstrap snapshot.
