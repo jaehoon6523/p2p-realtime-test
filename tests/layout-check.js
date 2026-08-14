@@ -75,7 +75,7 @@ const abilityData = fs.readFileSync(must('js/game/ability-definitions.js'),'utf8
 const config = fs.readFileSync(must('js/core/config-state.js'),'utf8');
 const server = fs.readFileSync(must('mmo-server/signaling-server.js'),'utf8');
 if(!config.includes('const MAX_PENDING_SHOOTS = 4;')) throw new Error('shoot concurrency cap missing');
-for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r25';"]){
+for(const expected of ["const SIGNAL_PROTOCOL = 5;", "const RULESET_REVISION = 'pssf-v13-r26';"]){
   if(!config.includes(expected)) throw new Error(`client missing ${expected}`);
   if(!server.includes(expected)) throw new Error(`server missing ${expected}`);
 }
@@ -103,7 +103,8 @@ if(!simulationText.includes('if(AUTO_MODE) tickAutoMode();')) throw new Error('A
 {
  const sim=fs.readFileSync(path.join(root,'js/game/simulation.js'),'utf8');
  if(sim.includes('queueCommandUntilBootstrap')) throw new Error('r21: ACK backlog must be removed');
- if(!sim.includes('const previousSample=evalMove(previous,now);')) throw new Error('r24: live retarget must advance persistent velocity without flushing old plan');
+ if(sim.includes('const previousSample=evalMove(previous,now);')) throw new Error('r26: retarget must not evaluate/brake the old destination');
+ if(!sim.includes('writeLocalMoveVelocity(velocity.vx,velocity.vy,now);')) throw new Error('r26: retarget must preserve exact persistent velocity');
  const cfg=fs.readFileSync(path.join(root,'js/core/config-state.js'),'utf8');
  if(!cfg.includes('const localMoveVelocity')) throw new Error('r24: persistent local velocity state missing');
 }

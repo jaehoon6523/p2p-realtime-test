@@ -2,7 +2,7 @@
 
 const PROTOCOL = 13;
 const SIGNAL_PROTOCOL = 5;
-const RULESET_REVISION = 'pssf-v13-r25';
+const RULESET_REVISION = 'pssf-v13-r26';
 const params = new URLSearchParams(location.search);
 const ROOM_ID = sanitizeRoomId(params.get('room') || 'default');
 const SIGNAL_URL = normalizeSignalUrl((params.get('signal') || '').trim());
@@ -61,6 +61,8 @@ function abilityTimingFor(ability){ return {cooldownTicks:abilityTicks(ability.c
 const MAX_COMBAT_RANGE = Math.max(...Object.values(ABILITY_DEFINITIONS).filter(v=>v.kind==='shoot').map(v=>v.range));
 const DASH_DISTANCE = ABILITY_DEFINITIONS.E.distance;
 const SIMULATION_HISTORY_LIMIT = 512;
+const SNAPSHOT_HISTORY_TAIL_SEQUENCES = 12; // bootstrap carries a bounded recent simulation prefix
+const HISTORY_REPAIR_MAX_STATES = 16;       // targeted repair payload cap
 const FINALIZED_HISTORY_LIMIT = 512;
 const MAX_RANGE = ABILITY_DEFINITIONS.Q.range; // legacy/basic attack range alias
 const HIT_RADIUS = 14;
@@ -71,6 +73,8 @@ const BULLET_TRAIL_MS = 160;
 const MOVE_SPEED = 220;
 const MOVE_ACCEL = 620;
 const MOVE_DECEL = 560;
+const MOVE_STEER_RATE = Math.PI * 2.2; // rad/s; turning preserves scalar speed
+const MOVE_RETARGET_BRAKE_GRACE_MS = 320; // repeated retargets do not arm destination braking
 const MOVE_MAX_DURATION = 5000;
 const AUDIT_STALL_MS = 1200;
 const DISCONNECT_GRACE_MS = 5000;

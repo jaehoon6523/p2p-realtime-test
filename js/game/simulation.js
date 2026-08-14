@@ -114,6 +114,19 @@ function stopLocalMovement({resetVelocity=true,now=performance.now()}={}){
 
 // Movement plan answers only "where is the destination?".
 // localMoveVelocity answers only "how fast and in which direction are we moving now?".
+function moveTowardScalar(current,target,maxDelta){
+    if(current<target) return Math.min(target,current+maxDelta);
+    if(current>target) return Math.max(target,current-maxDelta);
+    return current;
+}
+function wrapAngle(angle){
+    while(angle>Math.PI) angle-=Math.PI*2;
+    while(angle<-Math.PI) angle+=Math.PI*2;
+    return angle;
+}
+
+// Retargeting changes heading intent, not speed.
+// Speed magnitude is accelerated/braked separately so a turn cannot accidentally cancel velocity.
 function evalMove(movement,now){
     const tail=getPredictedTail(myId)||{x:movement.startX,y:movement.startY,alive:true};
     const velocity=readLocalMoveVelocity();
@@ -123,6 +136,7 @@ function evalMove(movement,now){
     const speed0=Math.hypot(vx0,vy0);
     const dx=movement.targetX-tail.x,dy=movement.targetY-tail.y;
     const distance=Math.hypot(dx,dy);
+
     if(distance<=MOVE_FINISH_EPSILON&&speed0<=MOVE_STOP_SPEED_EPSILON){
         return {x:movement.targetX,y:movement.targetY,vx:0,vy:0,speed:0,phase:'finished',finished:true,dt};
     }
@@ -132,42 +146,57 @@ function evalMove(movement,now){
 
     const ux=distance>1e-9?dx/distance:0;
     const uy=distance>1e-9?dy/distance:0;
-    const desiredSpeed=Math.min(MOVE_SPEED,Math.sqrt(Math.max(0,2*MOVE_DECEL*distance)));
-    const desiredVx=ux*desiredSpeed,desiredVy=uy*desiredSpeed;
-    const dvx=desiredVx-vx0,dvy=desiredVy-vy0;
-    const slowing=desiredSpeed<speed0-1e-6;
-    const maxDv=(slowing?MOVE_DECEL:MOVE_ACCEL)*dt;
-    const limited=clampVectorDelta(dvx,dvy,maxDv);
-    let vx=vx0+limited.x,vy=vy0+limited.y;
-    let speed=Math.hypot(vx,vy);
-    if(speed>MOVE_SPEED&&speed>1e-9){ const scale=MOVE_SPEED/speed; vx*=scale; vy*=scale; speed=MOVE_SPEED; }
+    const retargetAge=Math.max(0,now-(Number.isFinite(movement.retargetAt)?movement.retargetAt:now));
+    const stoppingDistance=speed0>0?(speed0*speed0)/(2*MOVE_DECEL):0;
+    const brakingArmed=retargetAge>=MOVE_RETARGET_BRAKE_GRACE_MS;
+    const braking=brakingArmed && distance<=Math.max(MOVE_FINISH_EPSILON,stoppingDistance+speed0*dt*0.35);
+    const targetSpeed=braking?Math.min(MOVE_SPEED,Math.sqrt(Math.max(0,2*MOVE_DECEL*distance))):MOVE_SPEED;
+    const speedRate=targetSpeed<speed0?MOVE_DECEL:MOVE_ACCEL;
+    let speed=moveTowardScalar(speed0,targetSpeed,speedRate*dt);
 
-    // Trapezoidal integration keeps acceleration continuous across retargets.
+    let heading;
+    if(speed0>MOVE_STOP_SPEED_EPSILON){
+        const currentAngle=Math.atan2(vy0,vx0);
+        const targetAngle=Math.atan2(uy,ux);
+        const delta=wrapAngle(targetAngle-currentAngle);
+        const limitedTurn=Math.max(-MOVE_STEER_RATE*dt,Math.min(MOVE_STEER_RATE*dt,delta));
+        heading=currentAngle+limitedTurn;
+    }else{
+        heading=Math.atan2(uy,ux);
+    }
+
+    let vx=Math.cos(heading)*speed;
+    let vy=Math.sin(heading)*speed;
+
+    // Trapezoidal integration preserves continuous motion while steering.
     let nextX=tail.x+(vx0+vx)*0.5*dt;
     let nextY=tail.y+(vy0+vy)*0.5*dt;
     const projected=typeof clampWorldPoint==='function'?clampWorldPoint(nextX,nextY):{x:nextX,y:nextY};
     if(Math.abs(projected.x-nextX)>1e-9) vx=0;
     if(Math.abs(projected.y-nextY)>1e-9) vy=0;
     nextX=projected.x; nextY=projected.y;
+    speed=Math.hypot(vx,vy);
 
     let remaining=Math.hypot(movement.targetX-nextX,movement.targetY-nextY);
-    const nearRadius=Math.max(MOVE_FINISH_EPSILON,speed0*dt*0.55);
-    if(remaining>distance&&distance<=nearRadius){
+    const travel=Math.hypot(nextX-tail.x,nextY-tail.y);
+    const towardTarget=distance>1e-9&&travel>1e-9
+        ? ((nextX-tail.x)*dx+(nextY-tail.y)*dy)/(travel*distance)
+        : 1;
+    const arrivalRadius=Math.max(MOVE_FINISH_EPSILON,travel*0.7);
+    if(remaining<=MOVE_FINISH_EPSILON || (towardTarget>0.75 && distance<=arrivalRadius)){
         nextX=movement.targetX; nextY=movement.targetY; vx=0; vy=0; speed=0; remaining=0;
-    }
-    if(remaining<=MOVE_FINISH_EPSILON){
-        nextX=movement.targetX; nextY=movement.targetY; vx=0; vy=0; speed=0;
         return {x:nextX,y:nextY,vx,vy,speed,phase:'finished',finished:true,dt};
     }
 
-    const turnDelta=Math.hypot(dvx,dvy);
+    const currentAngle=speed0>MOVE_STOP_SPEED_EPSILON?Math.atan2(vy0,vx0):Math.atan2(uy,ux);
+    const targetAngle=Math.atan2(uy,ux);
+    const turnError=Math.abs(wrapAngle(targetAngle-currentAngle));
     let phase='cruising';
-    if(slowing) phase='decelerating';
+    if(braking) phase='decelerating';
     else if(speed0<MOVE_SPEED-2) phase='accelerating';
-    else if(turnDelta>4) phase='steering';
+    else if(turnError>0.03) phase='steering';
     return {x:nextX,y:nextY,vx,vy,speed,phase,finished:false,dt};
 }
-
 // Movement has exactly one protocol position source: getPredictedTail(myId).
 function emitMoveTowardAbsolute(movement,targetX,targetY){
     for(let i=0;i<MOVE_MAX_CHUNKS_PER_TICK;i++){
@@ -224,13 +253,14 @@ function startMove(playerId,fromX,fromY,toX,toY,options={}){
     const previous=moveState[myId];
     const explicit=options&&options.initialVelocity;
 
-    // Advance only the persistent velocity to the retarget instant. The destination plan is replaced,
-    // but speed is never assigned by the click itself.
+    // Retarget is not a physics step. Preserve the exact current velocity vector and only
+    // move its time anchor to the click instant. Evaluating the old target here used to apply
+    // old-target braking during the click itself.
     if(Number.isFinite(explicit?.vx)&&Number.isFinite(explicit?.vy)){
         writeLocalMoveVelocity(explicit.vx,explicit.vy,now);
     }else if(previous){
-        const previousSample=evalMove(previous,now);
-        commitMoveVelocity(previousSample,now);
+        const velocity=readLocalMoveVelocity();
+        writeLocalMoveVelocity(velocity.vx,velocity.vy,now);
     }else{
         resetLocalMoveVelocity(now);
     }
@@ -241,6 +271,7 @@ function startMove(playerId,fromX,fromY,toX,toY,options={}){
     if(distance<=MOVE_FINISH_EPSILON){ stopLocalMovement({resetVelocity:true,now}); return; }
     moveState[myId]={
         startX,startY,targetX:toX,targetY:toY,
+        retargetAt:now,
         hardStopAt:now+MOVE_MAX_DURATION,lastWallAt:now
     };
     const velocity=readLocalMoveVelocity();
@@ -431,9 +462,19 @@ function bootstrapReadyForAuto(){
 function sendSnapshot(remoteId,{bootstrap=false}={}){
     if(!isPeerOpen(remoteId)) return false;
     const state=confirmedWorld[myId];
+    if(!state){
+        log('t-err',`BOOTSTRAP_STATE_MISSING peer=${remoteId}`);
+        return false;
+    }
+    let historyTail;
+    try{ historyTail=snapshotHistoryTail(); }
+    catch(error){
+        log('t-err',`BOOTSTRAP_HISTORY_BUILD_FAILED peer=${remoteId}: ${error.message}`);
+        return false;
+    }
     const snapshot={
         protocol:PROTOCOL,rulesetRevision:RULESET_REVISION,senderId:myId,clockTick:currentTick(),eventSequence:confirmedEventSeq.get(myId)||0,
-        state:{...state,deadObservedAt:0},stateHash:stateHash(state),historyTail:snapshotHistoryTail(),bootstrap:Boolean(bootstrap)
+        state:{...state,deadObservedAt:0},stateHash:stateHash(state),historyTail,bootstrap:Boolean(bootstrap)
     };
     const message={kind:'snapshot',snapshot};
     // Bootstrap state must precede seq=1 commands. Netem schedules messages independently,

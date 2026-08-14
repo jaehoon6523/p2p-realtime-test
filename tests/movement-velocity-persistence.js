@@ -13,7 +13,7 @@ if(sb<0||se<0||tb<0||te<0) throw new Error('movement blocks not found');
 const block=sim.slice(sb,se)+'\n'+sim.slice(tb,te);
 let now=1000;
 const c={
-  BASE_MAX_STEP:75,MOVE_DECEL:560,MOVE_ACCEL:620,MOVE_SPEED:220,MOVE_MAX_DURATION:8000,
+  BASE_MAX_STEP:75,MOVE_DECEL:560,MOVE_ACCEL:620,MOVE_SPEED:220,MOVE_STEER_RATE:Math.PI*2.2,MOVE_RETARGET_BRAKE_GRACE_MS:320,MOVE_MAX_DURATION:8000,
   myId:'me',roomReady:true,moveState:Object.create(null),localMoveVelocity:{vx:0,vy:0,lastStepAt:1000},
   performance:{now:()=>now},predicted:{x:0,y:0,alive:true,sequence:0},localCommandBackpressured:()=>false,
 };
@@ -25,7 +25,7 @@ c.executeLocal=cmd=>{ c.predicted={...c.predicted,x:c.predicted.x+cmd.dx,y:c.pre
 c.queueLocalRenderTarget=()=>{};
 vm.createContext(c);
 vm.runInContext(block+'\nthis.runTick=()=>tickMovement();',c);
-c.moveState.me={startX:0,startY:0,targetX:500,targetY:0,hardStopAt:9000,lastWallAt:1000};
+c.moveState.me={startX:0,startY:0,targetX:500,targetY:0,retargetAt:1000,hardStopAt:9000,lastWallAt:1000};
 now=1090;c.runTick();
 const v1=c.localMoveVelocity.vx;
 if(v1<=0) throw new Error(`first tick did not accelerate: vx=${v1}`);

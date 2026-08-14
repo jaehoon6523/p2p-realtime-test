@@ -282,7 +282,22 @@ async function createPeer(remoteId,isOfferer,remoteSdp){
     };
     const bindChannel=dc=>{
         entry.dc=dc;
-        dc.onopen=()=>{ if(pageUnloading||peers.get(remoteId)!==entry) return; log('t-sig',`DataChannel open ↔ ${remoteId}`); refreshMembership('data channel open'); relayWorld.delete(remoteId); markBootstrapPending(remoteId); sendSnapshot(remoteId,{bootstrap:true}); sendPresence(); sendNeighborDigest(remoteId); if(AUTO_MODE) setTimeout(tickAutoMode,0); updatePeerList(); };
+        dc.onopen=()=>{ 
+            if(pageUnloading||peers.get(remoteId)!==entry) return;
+            log('t-sig',`DataChannel open ↔ ${remoteId}`);
+            refreshMembership('data channel open');
+            relayWorld.delete(remoteId);
+            markBootstrapPending(remoteId);
+            try{
+                if(!sendSnapshot(remoteId,{bootstrap:true})) log('t-err',`BOOTSTRAP_SEND_FAILED peer=${remoteId}`);
+                sendPresence();
+                sendNeighborDigest(remoteId);
+                if(AUTO_MODE) setTimeout(tickAutoMode,0);
+            }catch(error){
+                log('t-err',`BOOTSTRAP_OPEN_INIT_FAILED peer=${remoteId}: ${error.message}`);
+            }
+            updatePeerList();
+        };
         dc.onmessage=event=>{ if(!pageUnloading&&peers.get(remoteId)===entry) deliverWireMessage(remoteId,event.data); };
         dc.onclose=()=>{ if(!pageUnloading&&peers.get(remoteId)===entry) removePeer(remoteId,'data channel closed'); };
         dc.onerror=event=>{ if(!pageUnloading) log('t-err',`DataChannel error ↔ ${remoteId}: ${event?.message||'unknown'}`); };
